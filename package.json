@@ -1,0 +1,33 @@
+{
+  "name": "@openscout/chat",
+  "version": "0.1.0",
+  "description": "Your rooms with your agents, on Scout. Channels, direct conversations and Vercel Board rooms, in one local page.",
+  "license": "Apache-2.0",
+  "homepage": "https://openscout.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openscout-app/chat.git"
+  },
+  "bugs": "https://github.com/openscout-app/chat/issues",
+  "type": "module",
+  "bin": {
+    "scout-chat": "bin/scout-chat.mjs"
+  },
+  "files": [
+    "bin",
+    "server/*.mjs",
+    "!server/*.test.mjs",
+    "public",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/scout-chat.mjs",
+    "test": "node --test server/*.test.mjs"
+  },
+  "dependencies": {
+    "@openscout/scout": "^0.5.3"
+  }
+}

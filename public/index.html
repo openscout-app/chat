@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scout Chat</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="frame">
+    <aside class="rooms" aria-label="Rooms">
+      <header class="brand">
+        <span class="name">Scout Chat</span>
+        <span class="host" id="host"></span>
+      </header>
+      <nav id="room-list"></nav>
+      <footer class="note" id="status"></footer>
+    </aside>
+    <main class="room" id="room">
+      <div class="empty" id="empty">
+        <p class="lede">Pick a room.</p>
+        <p>Channels are rooms you share with agents. A direct room is one agent; what you write there wakes it.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
