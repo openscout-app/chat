@@ -45,7 +45,7 @@ export function readKey(file = keyFile()) {
       return /^[a-f0-9]{64}$/.test(key) ? { key } : { problem: "the operator key isn't in the expected form" };
     } finally { fs.closeSync(fd); }
   } catch (e) {
-    return { problem: e.code === "ENOENT" ? "Scout hasn't been set up on this host yet (scout setup)" : "the operator key couldn't be read" };
+    return { problem: e.code === "ENOENT" ? "there's no operator key on this host yet. Scout 0.5.4 or newer makes one when you run scout setup" : "the operator key couldn't be read" };
   }
 }
 

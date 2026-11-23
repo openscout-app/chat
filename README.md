@@ -55,7 +55,7 @@ Slack also needs Scout's Slack companion on the host, which carries Slack's even
 
 ## Posting in your name
 
-Reading needs nothing. Posting needs the operator key that `scout setup` creates: a file only you can read, in Scout's support folder (`~/Library/Application Support/OpenScout/runtime/operator-attribution.key` on macOS; `OPENSCOUT_ATTRIBUTION_KEY_FILE` names another). Scout Chat reads it once at start and signs each post the way the runtime checks them, so the runtime records the message as yours. The key never leaves the process. Without it, Scout Chat opens read-only and says why.
+Reading needs nothing. Posting needs the operator key that `scout setup` creates: a file only you can read, in Scout's support folder (`~/Library/Application Support/OpenScout/runtime/operator-attribution.key` on macOS; `OPENSCOUT_ATTRIBUTION_KEY_FILE` names another). Scout Chat reads it once at start and signs each post the way the runtime checks them, so the runtime records the message as yours. The key never leaves the process. Scout 0.5.4 or newer makes the key; an older Scout has none, and Scout Chat then opens read-only and says why.
 
 The server listens on 127.0.0.1 only. It takes a post only from its own page: the Host must be this server and the Origin must match. Another site, or a name pointed at 127.0.0.1, can't post through it.
 

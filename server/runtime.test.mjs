@@ -26,7 +26,7 @@ test("finds the key scout setup made, or the one named explicitly", () => {
 test("reads only an owner-only key, and says why not otherwise", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scout-chat-"));
   const f = path.join(dir, "k");
-  assert.match(readKey(f).problem, /set up/);
+  assert.match(readKey(f).problem, /no operator key.*scout setup/);
   fs.writeFileSync(f, "ab".repeat(32) + "\n", { mode: 0o644 });
   fs.chmodSync(f, 0o644);
   assert.match(readKey(f).problem, /only you/);
