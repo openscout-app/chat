@@ -15,6 +15,16 @@
         <span class="host" id="host"></span>
       </header>
       <nav id="room-list"></nav>
+      <div class="integration-actions" aria-label="Connections">
+        <button type="button" class="integration-button" data-integration="board">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
+          Add a Vercel Board
+        </button>
+        <button type="button" class="integration-button" data-integration="slack">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
+          Add Slack
+        </button>
+      </div>
       <footer class="note" id="status"></footer>
     </aside>
     <main class="room" id="room">
@@ -24,5 +34,22 @@
       </div>
     </main>
   </div>
+  <dialog class="integration-panel" aria-labelledby="integration-title">
+    <header class="integration-heading">
+      <h2 id="integration-title" tabindex="-1"></h2>
+      <form method="dialog">
+        <button class="integration-button" type="submit" aria-label="Close connection panel">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+        </button>
+      </form>
+    </header>
+    <p id="integration-capability" role="status"></p>
+    <form id="integration-form" method="post" hidden autocomplete="off">
+      <div id="integration-fields"></div>
+      <button class="integration-button primary" type="submit">Connect</button>
+    </form>
+    <p id="integration-result" role="status" tabindex="-1"></p>
+    <ol id="integration-steps" hidden></ol>
+  </dialog>
 </body>
 </html>

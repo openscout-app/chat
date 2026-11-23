@@ -8,6 +8,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as rt from "./runtime.mjs";
+import { integrations as defaultIntegrations } from "./integrations.mjs";
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
@@ -18,13 +19,12 @@ export function sameHost(host, port) {
 }
 /** A write is allowed only from this server's own page. */
 export function allowedWrite(headers, port) {
-  if (!sameHost(headers.host, port)) return false;
-  const origin = headers.origin;
-  if (!origin) return false;
-  try { const u = new URL(origin); return u.protocol === "http:" && sameHost(u.host, port); } catch { return false; }
+  return sameHost(headers.host, port) && headers.origin === `http://${headers.host.toLowerCase()}`;
 }
 
-export function createServer({ port, key, keyProblem }) {
+const jsonWrite = (headers, port) => allowedWrite(headers, port) && /^application\/json(?:\s*;|$)/i.test(headers["content-type"] || "");
+
+export function createServer({ port, key, keyProblem, integrations = defaultIntegrations }) {
   const streams = new Set();
   const stopFollowing = rt.follow((conversationId) => {
     const line = `event: message\ndata: ${JSON.stringify({ conversationId })}\n\n`;
@@ -43,7 +43,8 @@ export function createServer({ port, key, keyProblem }) {
   });
 
   const server = http.createServer(async (req, res) => {
-    if (!sameHost(req.headers.host, port)) { res.writeHead(421); return res.end(); }
+    const localPort = port || server.address()?.port;
+    if (!sameHost(req.headers.host, localPort)) { res.writeHead(421); return res.end(); }
     const url = new URL(req.url, `http://${req.headers.host}`);
     const p = url.pathname;
     try {
@@ -52,6 +53,19 @@ export function createServer({ port, key, keyProblem }) {
         const node = up ? await rt.nodeInfo() : null;
         return json(res, 200, { runtime: up ? rt.runtimeUrl() : null, host: node?.name || null, canPost: Boolean(key), why: key ? null : keyProblem });
       }
+      if (p === "/api/integrations" && req.method === "GET") return json(res, 200, await integrations.status());
+      const connect = p.match(/^\/api\/integrations\/(board|slack)$/);
+      if (connect && req.method === "POST") {
+        if (!jsonWrite(req.headers, localPort)) return json(res, 403, { error: "posts come from this page only" });
+        let body;
+        try { body = await readBody(req); }
+        catch { return json(res, 400, { error: "Send the connection details as JSON." }); }
+        try { return json(res, 200, await integrations.connect(connect[1], body)); }
+        catch (e) {
+          const known = [400, 409, 502].includes(e.status);
+          return json(res, known ? e.status : 502, { error: known ? e.message : "Scout couldn't finish the request." });
+        }
+      }
       if (p === "/api/rooms") return json(res, 200, { rooms: await rt.rooms() });
       const m = p.match(/^\/api\/rooms\/([A-Za-z0-9._:-]+)\/messages$/);
       if (m && req.method === "GET") {
@@ -59,7 +73,7 @@ export function createServer({ port, key, keyProblem }) {
         return json(res, 200, { messages: await rt.messages(m[1], { agentName: room?.kind === "direct" ? room.agentName : null }) });
       }
       if (m && req.method === "POST") {
-        if (!allowedWrite(req.headers, port) || !/^application\/json/.test(req.headers["content-type"] || "")) return json(res, 403, { error: "posts come from this page only" });
+        if (!jsonWrite(req.headers, localPort)) return json(res, 403, { error: "posts come from this page only" });
         if (!key) return json(res, 409, { error: keyProblem || "posting isn't set up" });
         const { body } = await readBody(req);
         const text = typeof body === "string" ? body.trim() : "";

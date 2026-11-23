@@ -47,7 +47,7 @@ function renderRooms() {
   }
   if (!state.rooms.length) {
     nav.append(el("p", { className: "group quiet", textContent: state.status?.runtime
-      ? "No rooms yet. Ask an agent something with scout ask, or connect a Board: scout-chat connect board."
+      ? "No rooms yet. Ask an agent with scout ask, or add a Vercel Board below."
       : "Scout's runtime isn't answering on this host. Run scout-chat setup." }));
   }
 }
@@ -129,6 +129,119 @@ async function refreshRooms() {
   try { state.rooms = (await api("/api/rooms")).rooms; } catch { state.rooms = []; }
   renderRooms();
 }
+
+const panel = $(".integration-panel");
+const integrationForm = $("#integration-form");
+const fields = $("#integration-fields");
+const capability = $("#integration-capability");
+const result = $("#integration-result");
+const steps = $("#integration-steps");
+let panelRequest = 0;
+
+function inputField(label, name, { help, ...props } = {}) {
+  const input = el("input", { name, required: true, spellcheck: false, ...props });
+  const note = help ? el("small", { id: `help-${name}`, textContent: help }) : null;
+  if (note) input.setAttribute("aria-describedby", note.id);
+  return el("label", {}, el("span", { textContent: label }), input, note);
+}
+
+let syncTimer;
+function refreshAfterConnect(kind) {
+  refreshRooms();
+  if (kind !== "board") return;
+  clearInterval(syncTimer);
+  let remaining = 12;
+  syncTimer = setInterval(() => {
+    refreshRooms();
+    if (--remaining === 0) clearInterval(syncTimer);
+  }, 5000);
+}
+
+async function openIntegration(kind, title) {
+  const request = ++panelRequest;
+  $("#integration-title").textContent = title;
+  capability.textContent = "Checking this host…";
+  result.textContent = "";
+  steps.replaceChildren();
+  steps.hidden = true;
+  fields.replaceChildren();
+  integrationForm.hidden = true;
+  panel.showModal();
+  $("#integration-title").focus();
+
+  try {
+    const support = (await api("/api/integrations"))[kind];
+    if (request !== panelRequest || !panel.open) return;
+    capability.textContent = support.message || "";
+    if (!support.available) return;
+    if (kind === "board") {
+      fields.append(
+        inputField("Team ID, slug, or Board API URL", "target", { maxLength: 512, help: "The team slug is the name in vercel.com/<team>." }),
+        inputField("Credential entry name", "entry", {
+          type: "password", autocomplete: "off", maxLength: 128,
+          help: "Make a token on Vercel scoped to your team. Store it on this host with secret set <entry>. Enter the entry name here, not the token.",
+        }),
+      );
+    } else {
+      fields.append(
+        inputField("Project path", "project", { help: "Use the full path to a registered Scout project." }),
+        inputField("Agent ID (optional)", "agent", { required: false, maxLength: 128 }),
+      );
+    }
+    const submit = integrationForm.querySelector("button");
+    submit.disabled = false;
+    submit.textContent = kind === "board" ? "Connect Board" : "Start Slack setup";
+    integrationForm.hidden = false;
+    integrationForm.onsubmit = async (event) => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      const data = new FormData(integrationForm);
+      let body;
+      if (kind === "board") {
+        const entry = data.get("entry").trim();
+        const target = data.get("target").trim();
+        integrationForm.elements.entry.value = "";
+        if (!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(entry) || /^(vcp|vck|vca)_|^[A-Za-z0-9]{24,}$/i.test(entry)) {
+          result.textContent = "Enter the name of a secret_cli entry, not the token itself.";
+          integrationForm.elements.entry.focus();
+          return;
+        }
+        body = { [/^[a-z]+:\/\//i.test(target) ? "url" : "team"]: target, credential: `secret_cli:${entry}` };
+      } else {
+        body = { project: data.get("project"), agent: data.get("agent") };
+      }
+      submit.disabled = true;
+      result.textContent = kind === "board" ? "Connecting Board…" : "Starting Slack setup…";
+      try {
+        const receipt = await api(`/api/integrations/${kind}`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+        });
+        refreshAfterConnect(kind);
+        if (request !== panelRequest || !panel.open) return;
+        integrationForm.hidden = true;
+        capability.textContent = receipt.warning || "";
+        result.textContent = receipt.message;
+        if (receipt.steps?.length) {
+          steps.replaceChildren(...receipt.steps.map((step) => el("li", { textContent: step })));
+          steps.hidden = false;
+        }
+        result.focus();
+      } catch (err) {
+        if (request === panelRequest && panel.open) {
+          result.textContent = err.message;
+          submit.disabled = false;
+        }
+      }
+    };
+  } catch {
+    if (request === panelRequest && panel.open) capability.textContent = "Couldn't check this host. Close this panel and try again.";
+  }
+}
+
+panel.addEventListener("close", () => fields.replaceChildren());
+document.querySelectorAll("[data-integration]").forEach((button) => {
+  button.addEventListener("click", () => openIntegration(button.dataset.integration, button.textContent.trim()));
+});
 
 async function start() {
   try { state.status = await api("/api/status"); } catch { state.status = null; }

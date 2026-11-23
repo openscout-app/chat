@@ -34,6 +34,10 @@ npm test
 
 ## Connect a Vercel Board
 
+Choose **Add a Vercel Board** in the sidebar. Enter the team ID, slug, or Board API URL and the name of a local `secret_cli` entry. Store the token in the entry first; do not paste it into Chat. Chat refreshes the room list as Board channels sync.
+
+You can also connect from the terminal:
+
 ```sh
 secret set vercel-board              # store your Vercel access token once
 npx github:openscout-app/chat connect board --team <team ID or slug> --credential secret_cli:vercel-board
@@ -45,13 +49,17 @@ This uses `scout integration connect vercel-board`, which needs Scout 0.5.4 or n
 
 ## Connect Slack
 
+Choose **Add Slack** in the sidebar. Enter the path to a registered Scout project and, if needed, its agent ID. Chat starts setup and shows the commands to continue. If the Slack companion is unavailable, you can start setup, but you need the companion to complete it.
+
+You can also start setup from the terminal:
+
 ```sh
 npx github:openscout-app/chat connect slack --project <path to a project>
 ```
 
-This starts Slack setup for that project's agent and prints the steps that follow: create the Slack app from the manifest Scout gives you (Socket Mode), store its two tokens with `secret set`, name who may talk to it, then verify and start. Mentions of the app and direct messages then reach the agent, and each Slack thread stays one conversation. `scout integration status <operation>` always says which step is next.
+This starts Slack setup for that project's agent and prints the steps that follow: create the Slack app from the manifest Scout gives you (Socket Mode), store its two tokens with `secret set`, name who may talk to it, then start the connection and verify a test mention and threaded reply. Mentions of the app and direct messages then reach the agent, and each Slack thread stays one conversation. `scout integration status <operation>` always says which step is next.
 
-Slack also needs Scout's Slack companion on the host, which carries Slack's events to the runtime. It isn't published with Scout yet, so a Scout installed from npm stops at the verify step and says the companion is missing.
+Slack also needs Scout's Slack companion on the host, which carries Slack's events to the runtime. It isn't published with Scout yet, so a Scout installed from npm stops at credential verification and says the companion is missing.
 
 ## Posting in your name
 
@@ -63,7 +71,7 @@ The server listens on 127.0.0.1 only. It takes a post only from its own page: th
 
 Scout Chat finds the runtime the way Scout's own tools do: `SCOUT_RUNTIME_URL` or `OPENSCOUT_BROKER_URL` if set, else the host and port in `~/.openscout/config.json`, else `127.0.0.1:43110`. It reads rooms from `/v1/conversation-projection`, messages from `/v1/messages`, and follows `/v1/events/stream` for new ones. A post in a direct room goes to `/v1/deliver` as a consult to its agent; a post in a channel goes to `/v1/messages`. Sessions Scout only observes, such as a Claude Code transcript, are not rooms and don't appear.
 
-`npx github:openscout-app/chat status` says whether the runtime is up, whether Chat can post in your name, and which Board connections exist.
+`npx github:openscout-app/chat status` says whether the runtime is up, whether Chat can post in your name, and whether this host can connect a Board or start Slack setup.
 
 ## License
 

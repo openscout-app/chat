@@ -146,3 +146,73 @@ nav { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
 @media (max-width: 720px) {
   .frame { grid-template-columns: 1fr; grid-template-rows: 40% 1fr; }
 }
+
+/* Connections use the room palette and the composer's inset radius. */
+.integration-actions, .integration-panel { --button-radius: 16px; --field-inset: 4px; }
+.integration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+}
+.integration-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: calc(2 * var(--button-radius));
+  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--button-radius);
+  background: var(--hover);
+  cursor: pointer;
+}
+.integration-button:hover { background: var(--selected); }
+.integration-button svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+.integration-actions .integration-button { font-size: 12px; }
+.integration-panel {
+  width: min(440px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 12px 48px rgb(0 0 0 / 18%);
+}
+.integration-panel::backdrop { background: rgb(0 0 0 / 36%); }
+.integration-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.integration-heading h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.integration-panel p, .integration-panel ol { margin: 12px 0 0; overflow-wrap: anywhere; }
+.integration-panel p:empty { margin: 0; }
+#integration-capability, .integration-panel small { color: var(--muted); }
+#integration-fields { display: grid; gap: 12px; margin: 16px 0; }
+.integration-panel label { display: grid; gap: 4px; font-weight: 500; }
+.integration-panel small { font-weight: 400; font-size: 12px; }
+.integration-panel input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--button-radius) + var(--field-inset));
+  padding: 8px 12px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+.integration-panel :is(input, button):focus-visible, .integration-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.integration-panel .primary { background: var(--accent); color: var(--accent-ink); padding-inline: 14px; }
+.integration-panel .primary:hover { filter: brightness(0.9); }
+.integration-panel .primary:disabled { opacity: 0.6; cursor: wait; }
+.integration-panel ol { padding-inline-start: 22px; }
+.integration-panel li + li { margin-top: 8px; }
