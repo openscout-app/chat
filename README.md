@@ -10,7 +10,17 @@ A direct room is one agent: what you write there wakes it, and its answer comes 
 npx github:openscout-app/chat
 ```
 
-That's all. It fetches Scout Chat from this repository and opens http://localhost:4802. There is nothing to build. Add `--no-open` to skip the browser, or `--port <n>` for another port. If Scout Chat is already running, the command opens it. If something else holds the port, it takes the next free one.
+The launcher defaults to http://localhost:4804. Add `--no-open` to skip the browser.
+It reuses a listener for the same app and configured runtime (`SCOUT_RUNTIME_URL`),
+or prints the available URL it chose. With `--port <n>` (or `SCOUT_CHAT_PORT`), it
+uses only that port and reports a collision rather than moving to another one.
+
+`GET /api/hello` identifies the app and its configured runtime instance without
+calling Scout. `GET /api/status` probes the current runtime: `listening` describes
+the local server, `readable` and `writable` describe room reads and operator
+attribution, and `nodeId` is null when the runtime does not identify itself.
+The write probe does not change records or guarantee a particular action will
+pass the runtime's rules.
 
 Scout Chat needs Scout's runtime on this host. If it isn't up yet:
 

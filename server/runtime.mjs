@@ -1,17 +1,18 @@
 // Scout's runtime, as Chat uses it: rooms and messages to read, and a signed post as the operator.
 //
 // Reads need nothing. A post in your name carries the operator attribution that `scout setup`
-// created: an owner-only key file under Scout's support folder. Chat reads it into memory once and
+// created: an owner-only key file under Scout's support folder. Chat reads it when needed and
 // signs each post the way the runtime verifies them (local-admin:v1, HMAC-SHA256). The key never
 // leaves this process and is never printed.
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export function runtimeUrl() {
   const env = process.env.SCOUT_RUNTIME_URL || process.env.OPENSCOUT_BROKER_URL;
-  if (env) return env.replace(/\/$/, "");
+  if (env) return env.replace(/\/+$/, "");
   try {
     const home = process.env.OPENSCOUT_HOME || path.join(os.homedir(), ".openscout");
     const c = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
@@ -60,24 +61,51 @@ export function sign(key, { method, path: p, body = "", destinationKeyId, ts = D
   };
 }
 
-async function get(p, ms = 8e3) {
-  const res = await fetch(`${runtimeUrl()}${p}`, { signal: AbortSignal.timeout(ms) });
-  if (!res.ok) throw new Error(`${p}: ${res.status}`);
+async function get(p, ms = 8e3, headers) {
+  const res = await fetch(`${runtimeUrl()}${p}`, { headers, redirect: "error", signal: AbortSignal.timeout(ms) });
+  if (!res.ok) { await res.body?.cancel(); throw new Error(`${p}: ${res.status}`); }
   return res.json();
 }
 
-let node = null;
 /** This host's runtime node: its id, and the key id a signed post is bound to. */
 export async function nodeInfo() {
-  if (!node) {
-    const n = await get("/v1/node", 3e3);
-    node = { id: n.id, name: n.name || n.hostName || "", keyId: n.card?.keyId };
-  }
-  return node;
+  const n = await get("/v1/node", 2500);
+  if (typeof n?.id !== "string" || !n.id) throw new Error("the runtime didn't name its node");
+  return { id: n.id, name: n.name || n.hostName || "", keyId: n.card?.keyId };
 }
 
 export async function up() {
-  try { await nodeInfo(); return true; } catch { node = null; return false; }
+  try { await nodeInfo(); return true; } catch { return false; }
+}
+
+/** Verify the current read path and local operator attribution without writing a record. */
+export async function readiness({ key, problem } = readKey()) {
+  const p = "/v1/conversation-projection?limit=1";
+  const base = runtimeUrl();
+  const [node, readable] = await Promise.all([
+    nodeInfo().catch(() => null),
+    get(p, 2500).then((d) => Array.isArray(d?.items), () => false),
+  ]);
+  let why = !node ? "Scout's runtime isn't answering"
+    : !readable ? "the runtime isn't serving rooms"
+    : !key ? problem || "posting isn't set up"
+    : !node.keyId ? "the runtime didn't name its signing key"
+    : null;
+  if (!why) {
+    try {
+      const [signed, rejectsInvalidProof] = await Promise.all([
+        get(p, 2500, sign(key, { method: "GET", path: p, destinationKeyId: node.keyId })),
+        // A runtime that ignores proof headers can answer the signed read without authenticating it.
+        fetch(base + p, { headers: { "x-openscout-local-admin": "invalid" }, redirect: "error", signal: AbortSignal.timeout(2500) })
+          .then(async (r) => r.status === 401
+            ? (await r.json())?.error === "invalid_local_admin_proof"
+            : (await r.body?.cancel(), false)),
+      ]);
+      if (!Array.isArray(signed?.items) || !rejectsInvalidProof) throw new Error();
+    } catch { why = "the runtime didn't verify the operator key"; }
+  }
+  return { listening: true, readable, writable: !why, runtime: node ? base : null,
+    host: node?.name || null, nodeId: node?.id || null, canPost: !why, why };
 }
 
 const ROOM_KINDS = new Set(["channel", "direct", "group_direct"]);
@@ -159,6 +187,7 @@ export async function post({ room, body }, key) {
     method: "POST",
     headers: { "content-type": "application/json", ...sign(key, { method: "POST", path: p, body: text, destinationKeyId: n.keyId }) },
     body: text,
+    redirect: "error",
     signal: AbortSignal.timeout(15e3),
   });
   const out = await res.json().catch(() => ({}));
@@ -169,12 +198,11 @@ export async function post({ room, body }, key) {
 
 /** Follow the runtime's event stream and call fn with each posted message's conversation id. */
 export function follow(fn) {
-  let stopped = false, ctl;
+  const lifetime = new AbortController();
   (async function loop(n = 0) {
-    while (!stopped) {
+    while (!lifetime.signal.aborted) {
       try {
-        ctl = new AbortController();
-        const res = await fetch(`${runtimeUrl()}/v1/events/stream`, { signal: ctl.signal });
+        const res = await fetch(`${runtimeUrl()}/v1/events/stream`, { signal: lifetime.signal });
         if (!res.ok || !res.body) throw new Error(String(res.status));
         n = 0;
         let buf = "", ev = "";
@@ -190,9 +218,8 @@ export function follow(fn) {
           }
         }
       } catch {}
-      if (stopped) break;
-      await new Promise((r) => setTimeout(r, Math.min(30e3, 1e3 * 2 ** Math.min(n++, 5))));
+      await sleep(Math.min(30e3, 1e3 * 2 ** Math.min(n++, 5)), undefined, { signal: lifetime.signal }).catch(() => {});
     }
   })();
-  return () => { stopped = true; ctl?.abort(); };
+  return () => lifetime.abort();
 }
