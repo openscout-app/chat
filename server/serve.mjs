@@ -7,6 +7,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hello } from "./local.mjs";
 import * as rt from "./runtime.mjs";
 import { integrations as defaultIntegrations } from "./integrations.mjs";
 
@@ -26,10 +27,12 @@ const jsonWrite = (headers, port) => allowedWrite(headers, port) && /^applicatio
 
 export function createServer({ port, key, keyProblem, integrations = defaultIntegrations }) {
   const streams = new Set();
-  const stopFollowing = rt.follow((conversationId) => {
+  const operatorKey = () => key === undefined && keyProblem === undefined ? rt.readKey() : { key, problem: keyProblem };
+  let stopFollowing;
+  const onMessage = (conversationId) => {
     const line = `event: message\ndata: ${JSON.stringify({ conversationId })}\n\n`;
     for (const res of streams) res.write(line);
-  });
+  };
 
   const json = (res, code, body) => {
     res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
@@ -48,11 +51,8 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
     const url = new URL(req.url, `http://${req.headers.host}`);
     const p = url.pathname;
     try {
-      if (p === "/api/status") {
-        const up = await rt.up();
-        const node = up ? await rt.nodeInfo() : null;
-        return json(res, 200, { runtime: up ? rt.runtimeUrl() : null, host: node?.name || null, canPost: Boolean(key), why: key ? null : keyProblem });
-      }
+      if (p === "/api/hello" && req.method === "GET") return json(res, 200, hello());
+      if (p === "/api/status") return json(res, 200, await rt.readiness(operatorKey()));
       if (p === "/api/integrations" && req.method === "GET") return json(res, 200, await integrations.status());
       const connect = p.match(/^\/api\/integrations\/(board|slack)$/);
       if (connect && req.method === "POST") {
@@ -74,7 +74,8 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
       }
       if (m && req.method === "POST") {
         if (!jsonWrite(req.headers, localPort)) return json(res, 403, { error: "posts come from this page only" });
-        if (!key) return json(res, 409, { error: keyProblem || "posting isn't set up" });
+        const { key, problem } = operatorKey();
+        if (!key) return json(res, 409, { error: problem || "posting isn't set up" });
         const { body } = await readBody(req);
         const text = typeof body === "string" ? body.trim() : "";
         if (!text) return json(res, 400, { error: "write something first" });
@@ -103,6 +104,14 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
       json(res, down ? 503 : 502, { error: down ? "Scout's runtime isn't answering on this host" : String(e?.message || e) });
     }
   });
-  server.on("close", () => { stopFollowing(); for (const s of streams) s.end(); });
+  server.on("listening", () => { stopFollowing = rt.follow(onMessage); });
+  server.on("close", () => { stopFollowing?.(); for (const s of streams) s.end(); });
   return server;
+}
+
+export function serve(port) {
+  const server = createServer({ port });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject).listen(port, "127.0.0.1", () => resolve(server));
+  });
 }
