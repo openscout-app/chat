@@ -146,15 +146,14 @@ function hasReceiveRoute(endpoint, { pairingSessions, sameHost, now }) {
   }
   if (transport === "pairing_bridge" && (state === "idle" || busy))
     return pairingSessions.has(endpoint.sessionId);
-  if (sameHost && (state === "idle" || busy) && metadata?.attachedLive === true &&
-      ((transport === "tmux" && endpoint.pane?.trim()) || (transport === "ghostty" && metadata.ghosttyTerminalId))) {
-    // Same non-signalling PID check Scout uses for an explicitly attached terminal.
+  if (transport === "ghostty" && sameHost && (state === "idle" || busy) &&
+      metadata?.attachedLive === true && metadata.ghosttyTerminalId) {
     const pid = metadata.livePid;
     if (!Number.isSafeInteger(pid) || pid <= 1) return false;
     try { process.kill(pid, 0); return true; } catch { return false; }
   }
-  // A bare tmux registration is not a live session. Do not infer a process
-  // or a verified launcher from its state, session name or wake policy.
+  // For tmux, even a live PID cannot confirm that the registered pane still
+  // exists on the same TTY. Leave it out rather than guess.
   return false;
 }
 

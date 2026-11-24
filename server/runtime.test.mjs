@@ -88,10 +88,14 @@ test("first asks exclude a Home-reachable idle tmux registration with no live se
   assert.deepEqual((await askTargets()).map((a) => a.id), ["preferred-inbox", "reader"]);
 });
 
-test("an attached tmux pane needs a live process on the broker's own host", async (t) => {
-  const attached = (agentId, pid) => ({ agentId, transport: "tmux", state: "idle", pane: "%1",
-    metadata: { attachedLive: true, livePid: pid } });
-  const endpoints = [attached("running", process.pid), attached("exited", 2 ** 30), attached("no-pid", undefined)];
+test("a live local PID does not confirm that a registered tmux pane still exists", async (t) => {
+  const ghostty = (agentId, pid) => ({ agentId, transport: "ghostty", state: "idle",
+    metadata: { attachedLive: true, ghosttyTerminalId: "terminal", livePid: pid } });
+  const endpoints = [
+    { agentId: "unconfirmed-pane", transport: "tmux", state: "idle", pane: "%999999",
+      metadata: { attachedLive: true, livePid: process.pid, liveTty: "registered-tty" } },
+    ghostty("running", process.pid), ghostty("exited", 2 ** 30), ghostty("no-pid", undefined),
+  ];
   const original = process.env.SCOUT_RUNTIME_URL;
   t.after(() => {
     if (original === undefined) delete process.env.SCOUT_RUNTIME_URL;
