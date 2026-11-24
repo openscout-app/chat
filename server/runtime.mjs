@@ -4,7 +4,7 @@
 // created: an owner-only key file under Scout's support folder. Chat reads it when needed and
 // signs each post the way the runtime verifies them (local-admin:v1, HMAC-SHA256). The key never
 // leaves this process and is never printed.
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -119,6 +119,7 @@ export async function rooms(limit = 200) {
     kind: i.kind === "channel" ? "channel" : "direct",
     title: (i.title || i.agentName || i.conversationId).replace(/\s*\(Vercel Board\)$/, ""),
     board: /\(Vercel Board\)$/.test(i.title || ""),
+    askTarget: i.kind !== "channel" && i.agentId ? { id: i.agentId, name: i.agentName || i.agentId } : null,
     agentId: i.agentId || null,
     agentName: i.agentName || null,
     preview: i.preview || "",
@@ -126,6 +127,17 @@ export async function rooms(limit = 200) {
     unread: i.unreadCount || 0,
     state: i.activityState || null,
   }));
+}
+
+/** Registered targets only. An actor name in message history isn't an address. */
+export async function askTargets() {
+  const [snapshot, { endpoints }] = await Promise.all([get("/v1/snapshot?scope=agents"), get("/v1/endpoints")]);
+  const live = new Set(endpoints.filter((e) => ["active", "idle", "working", "waiting"].includes(e.state)).map((e) => e.agentId));
+  return Object.values(snapshot.agents).filter((a) => a.kind === "agent" && a.id &&
+    (live.has(a.id) || a.wakePolicy === "on_demand" || a.wakePolicy === "keep_warm") &&
+    a.capabilities?.some((c) => c === "chat" || c === "invoke"))
+    .map((a) => ({ id: a.id, name: a.displayName || a.id }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 let names = { at: 0, map: new Map() };
@@ -169,19 +181,17 @@ export async function messages(conversationId, { limit = 200, agentName = null, 
   })).sort((a, b) => a.at - b.at);
 }
 
-/**
- * Post as the operator. In a direct room the message goes to its agent as a consult, which wakes
- * the agent and opens a flight; in a channel it is a room message.
- */
-export async function post({ room, body }, key) {
+/** Only an addressed consult asks an agent. Everything else posts to the conversation. */
+export async function post({ conversationId, target, body, requestId = randomUUID() }, key) {
   const n = await nodeInfo();
   if (!n.keyId) throw new Error("the runtime didn't name its key, so a post can't be signed");
-  const createdAt = Date.now(), id = `chat-${createdAt.toString(36)}-${randomBytes(4).toString("hex")}`;
-  const [p, payload] = room.kind === "direct" && room.agentId
-    ? ["/v1/deliver", { id, requesterId: "operator", requesterNodeId: n.id, targetAgentId: room.agentId, body,
-      intent: "consult", ensureAwake: true, createdAt, messageMetadata: { source: "scout-chat" } }]
-    : ["/v1/messages", { id, requestId: id, conversationId: room.id, actorId: "operator", originNodeId: n.id,
-      class: "agent", body, visibility: "workspace", policy: "durable", createdAt, metadata: { source: "scout-chat" } }];
+  const id = `chat-${requestId}`;
+  // The broker fingerprints consult payloads for replay. Leave their timestamp to it.
+  const [p, payload] = target
+    ? ["/v1/deliver", { id, requestId, requesterId: "operator", requesterNodeId: n.id, targetAgentId: target.id, body,
+      intent: "consult", ensureAwake: true, messageMetadata: { source: "scout-chat" } }]
+    : ["/v1/messages", { id, requestId, conversationId, actorId: "operator", originNodeId: n.id,
+      class: "agent", body, visibility: "workspace", policy: "durable", createdAt: Date.now(), metadata: { source: "scout-chat" } }];
   const text = JSON.stringify(payload);
   const res = await fetch(`${runtimeUrl()}${p}`, {
     method: "POST",
@@ -192,32 +202,47 @@ export async function post({ room, body }, key) {
   });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || out.message || `the runtime refused the post (${res.status})`);
-  if (out.kind && out.kind !== "delivery") throw new Error(out.reason || out.message || "the runtime didn't deliver it");
-  return { id };
+  if (target) {
+    const roomId = out.receipt?.conversationId || out.conversation?.id;
+    const messageId = out.receipt?.messageId || out.message?.id;
+    if (out.kind !== "delivery" || out.accepted !== true || !roomId || !messageId)
+      throw new Error(out.reason || "Scout didn't confirm acceptance of the ask.");
+    const actualId = out.receipt?.targetAgentId || out.targetAgentId || target.id;
+    return { kind: "ask", requestId, id: messageId, conversationId: roomId,
+      agent: actualId === target.id ? target.name : actualId };
+  }
+  if (out.ok !== true || !out.message?.id) throw new Error("Scout didn't confirm the post.");
+  return { kind: "post", requestId, conversationId, id: out.message.id };
 }
 
-/** Follow the runtime's event stream and call fn with each posted message's conversation id. */
-export function follow(fn) {
+/** Relay both messages and gaps in the upstream stream, even while the browser stays connected. */
+export function follow({ onMessage, onConnection, onTargets }) {
   const lifetime = new AbortController();
   (async function loop(n = 0) {
     while (!lifetime.signal.aborted) {
       try {
         const res = await fetch(`${runtimeUrl()}/v1/events/stream`, { signal: lifetime.signal });
-        if (!res.ok || !res.body) throw new Error(String(res.status));
+        if (!res.ok || !res.body) { await res.body?.cancel(); throw new Error(String(res.status)); }
+        onConnection("connected");
         n = 0;
+        const decoder = new TextDecoder();
         let buf = "", ev = "";
         for await (const chunk of res.body) {
-          buf += Buffer.from(chunk).toString("utf8");
+          buf += decoder.decode(chunk, { stream: true });
           let i;
           while ((i = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, i).replace(/\r$/, ""); buf = buf.slice(i + 1);
             if (line.startsWith("event:")) ev = line.slice(6).trim();
             else if (line.startsWith("data:") && (ev === "message.posted" || ev === "message.corrected")) {
-              try { const d = JSON.parse(line.slice(5)); fn(d.payload?.message?.conversationId || d.message?.conversationId || null); } catch {}
+              try { const d = JSON.parse(line.slice(5)); onMessage(d.payload?.message?.conversationId || d.message?.conversationId || null); } catch {}
+            } else if (line.startsWith("data:") && (ev === "agent.registered" || ev.startsWith("agent.endpoint."))) {
+              onTargets();
             } else if (!line) ev = "";
           }
         }
       } catch {}
+      if (lifetime.signal.aborted) break;
+      onConnection("reconnecting");
       await sleep(Math.min(30e3, 1e3 * 2 ** Math.min(n++, 5)), undefined, { signal: lifetime.signal }).catch(() => {});
     }
   })();

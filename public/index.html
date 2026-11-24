@@ -11,11 +11,18 @@
   <div class="frame">
     <aside class="rooms" aria-label="Rooms">
       <header class="brand">
-        <span class="name">Scout Chat</span>
+        <span class="name" tabindex="-1">Scout Chat</span>
         <span class="host" id="host"></span>
       </header>
-      <nav id="room-list"></nav>
-      <div class="integration-actions" aria-label="Connections">
+      <div class="index-scroll">
+        <nav id="room-list" aria-label="Conversations">
+          <section class="group" id="channels" hidden><h2>Channels</h2><div></div></section>
+          <section class="group" id="direct" hidden><h2>Direct</h2><div></div></section>
+        </nav>
+        <div id="index-empty"></div>
+      </div>
+      <section class="integration-actions" aria-labelledby="connections-title">
+        <h2 id="connections-title">Connections</h2>
         <button type="button" class="integration-button" data-integration="board">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
           Add a Vercel Board
@@ -24,17 +31,45 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
           Add Slack
         </button>
-      </div>
+      </section>
       <footer class="note" id="status"></footer>
     </aside>
     <main class="room" id="room">
       <div class="empty" id="empty">
-        <p class="lede">Pick a room.</p>
-        <p>Channels are rooms you share with agents. A direct room is one agent; what you write there wakes it.</p>
+        <h1 class="lede" id="empty-title">Loading rooms…</h1>
+        <p id="empty-detail"></p>
+        <button class="action" id="first-ask" type="button" hidden>Ask an agent</button>
+        <div id="recovery" hidden>
+          <p id="connection-status" role="status"></p>
+          <div class="setup" hidden>
+            <code id="setup-command">npx github:openscout-app/chat setup</code>
+            <button class="action" type="button" id="copy">Copy</button>
+          </div>
+          <button class="action" type="button" id="check">Check again</button>
+        </div>
       </div>
+      <section id="conversation" hidden>
+        <header class="room-head">
+          <a class="rooms-back" href="/">Rooms</a>
+          <h1 tabindex="-1"></h1><span class="sub"></span>
+        </header>
+        <div class="log" tabindex="0" role="region" aria-label="Messages">
+          <p id="log-note" class="quiet" hidden></p>
+          <div id="messages"></div>
+        </div>
+        <div id="room-composer"></div>
+      </section>
     </main>
   </div>
-  <dialog class="integration-panel" aria-labelledby="integration-title">
+  <dialog class="integration-panel" id="ask-panel" aria-labelledby="ask-title">
+    <header class="integration-heading">
+      <h2 id="ask-title">Ask an agent</h2>
+      <form method="dialog"><button class="action" type="submit">Close</button></form>
+    </header>
+    <label>Agent<select id="ask-target"></select></label>
+    <div id="ask-composer"></div>
+  </dialog>
+  <dialog class="integration-panel" id="connections-panel" aria-labelledby="integration-title">
     <header class="integration-heading">
       <h2 id="integration-title" tabindex="-1"></h2>
       <form method="dialog">

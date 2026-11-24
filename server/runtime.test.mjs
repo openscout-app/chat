@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { keyFile, messages, readKey, sign } from "./runtime.mjs";
+import { askTargets, keyFile, messages, post, readKey, sign } from "./runtime.mjs";
 
 test("opens an older reply only in its own conversation", async (t) => {
   const message = { id: "old/reply", conversationId: "room-a", class: "agent", actorId: "alex", createdAt: 1, body: "Earlier reply" };
@@ -55,4 +56,29 @@ test("reads only an owner-only key, and says why not otherwise", () => {
   fs.writeFileSync(f, "not a key");
   assert.match(readKey(f).problem, /expected form/);
   fs.rmSync(dir, { recursive: true });
+});
+
+test("first asks offer only registered agents that can chat and are live or wakeable", async (t) => {
+  const agent = (id, data) => ({ kind: "agent", id, capabilities: ["chat"], wakePolicy: "manual", ...data });
+  const snapshot = { agents: {
+    awake: agent("awake"), wakeable: agent("wakeable", { wakePolicy: "on_demand" }),
+    offline: agent("offline"), stale: agent("stale"), unrelated: agent("unrelated", { capabilities: ["listen"] }),
+  } };
+  const endpoints = [{ agentId: "awake", state: "idle" }, { agentId: "stale", state: "stopped" }, { agentId: "unrelated", state: "active" }];
+  t.mock.method(globalThis, "fetch", async (url) => Response.json(new URL(url).pathname === "/v1/endpoints" ? { endpoints } : snapshot));
+  assert.deepEqual((await askTargets()).map((a) => a.id), ["awake", "wakeable"]);
+});
+
+test("receipt names the accepted target and rejects unconfirmed responses on either route", async (t) => {
+  let response = { kind: "delivery", accepted: true, receipt: { messageId: "result", conversationId: "room", targetAgentId: "actual" } };
+  t.mock.method(globalThis, "fetch", async (url) => Response.json(
+    new URL(url).pathname === "/v1/node" ? { id: "node", card: { keyId: "key" } } : response));
+  const input = { target: { id: "requested", name: "Requested" }, requestId: "request", body: "Hello" };
+  const key = randomBytes(32).toString("hex");
+  assert.deepEqual(await post(input, key), { kind: "ask", agent: "actual", requestId: "request", conversationId: "room", id: "result" });
+  for (const invalid of [{}, { kind: "delivery", accepted: false }, { kind: "question" }]) {
+    response = invalid;
+    await assert.rejects(post(input, key), /confirm acceptance/);
+    await assert.rejects(post({ ...input, target: null, conversationId: "room" }, key), /confirm the post/);
+  }
 });

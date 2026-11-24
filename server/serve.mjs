@@ -29,9 +29,13 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
   const streams = new Set();
   const operatorKey = () => key === undefined && keyProblem === undefined ? rt.readKey() : { key, problem: keyProblem };
   let stopFollowing;
-  const onMessage = (conversationId) => {
-    const line = `event: message\ndata: ${JSON.stringify({ conversationId })}\n\n`;
-    for (const res of streams) res.write(line);
+  let connection = "connecting";
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+  const broadcast = (name, data) => { for (const res of streams) res.write(event(name, data)); };
+  const onConnection = (next) => {
+    if (connection === next) return;
+    connection = next;
+    broadcast("connection", connection);
   };
 
   const json = (res, code, body) => {
@@ -66,7 +70,10 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
           return json(res, known ? e.status : 502, { error: known ? e.message : "Scout couldn't finish the request." });
         }
       }
-      if (p === "/api/rooms") return json(res, 200, { rooms: await rt.rooms() });
+      if (p === "/api/rooms") {
+        const rooms = await rt.rooms();
+        return json(res, 200, rooms.length ? { rooms } : { rooms, targets: await rt.askTargets().catch(() => null) });
+      }
       const m = p.match(/^\/api\/rooms\/([^/]+)\/messages$/);
       let roomId;
       if (m) {
@@ -74,25 +81,38 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
       }
       if (m && req.method === "GET") {
         const room = (await rt.rooms()).find((r) => r.id === roomId);
-        return json(res, 200, { messages: await rt.messages(roomId, {
+        return json(res, 200, { knownRoom: !!room, messages: await rt.messages(roomId, {
           agentName: room?.kind === "direct" ? room.agentName : null,
           messageId: url.searchParams.get("message"),
         }) });
       }
-      if (m && req.method === "POST") {
+      const firstAsk = p === "/api/ask";
+      if ((m || firstAsk) && req.method === "POST") {
         if (!jsonWrite(req.headers, localPort)) return json(res, 403, { error: "posts come from this page only" });
         const { key, problem } = operatorKey();
         if (!key) return json(res, 409, { error: problem || "posting isn't set up" });
-        const { body } = await readBody(req);
+        let data;
+        try { data = await readBody(req); } catch {}
+        if (!data || typeof data !== "object" || Array.isArray(data)) return json(res, 400, { error: "Send the message as JSON." });
+        const { body, requestId, targetAgentId } = data;
+        if (requestId !== undefined && (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(requestId)))
+          return json(res, 400, { error: "Invalid request ID." });
         const text = typeof body === "string" ? body.trim() : "";
         if (!text) return json(res, 400, { error: "write something first" });
+        if (firstAsk) {
+          const target = (await rt.askTargets()).find((a) => a.id === targetAgentId);
+          if (!target) return json(res, 409, { error: "That agent is no longer available." });
+          return json(res, 200, await rt.post({ target, body: text, requestId }, key));
+        }
         const room = (await rt.rooms()).find((r) => r.id === roomId);
         if (!room) return json(res, 404, { error: "that room isn't on this host" });
-        return json(res, 200, await rt.post({ room, body: text }, key));
+        if (targetAgentId !== undefined && targetAgentId !== (room.askTarget?.id ?? null))
+          return json(res, 409, { error: "The room’s recipient changed. Check the room before sending." });
+        return json(res, 200, await rt.post({ conversationId: room.id, target: room.askTarget, body: text, requestId }, key));
       }
       if (p === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-        res.write(": open\n\n");
+        res.write(event("connection", connection));
         streams.add(res);
         const ping = setInterval(() => res.write(": ping\n\n"), 25e3);
         req.on("close", () => { clearInterval(ping); streams.delete(res); });
@@ -111,7 +131,13 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
       json(res, down ? 503 : 502, { error: down ? "Scout's runtime isn't answering on this host" : String(e?.message || e) });
     }
   });
-  server.on("listening", () => { stopFollowing = rt.follow(onMessage); });
+  server.on("listening", () => {
+    stopFollowing = rt.follow({
+      onMessage: (conversationId) => broadcast("message", { conversationId }),
+      onConnection,
+      onTargets: () => broadcast("targets", null),
+    });
+  });
   server.on("close", () => { stopFollowing?.(); for (const s of streams) s.end(); });
   return server;
 }
