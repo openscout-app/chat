@@ -61,6 +61,14 @@ This starts Slack setup for that project's agent and prints the steps that follo
 
 Slack also needs Scout's Slack companion on the host, which carries Slack's events to the runtime. It isn't published with Scout yet, so a Scout installed from npm stops at credential verification and says the companion is missing.
 
+## Opening a discussion
+
+A discussion link can open a room at a particular message. The URL takes the
+form `/?message=<message-id>#<conversation-id>`, with each ID URL-encoded.
+Chat also looks up older linked messages outside the recent history. If the
+target is unavailable, the room says so. A room-only link still uses
+`/#<conversation-id>`.
+
 ## Posting in your name
 
 Reading needs nothing. Posting needs the operator key that `scout setup` creates: a file only you can read, in Scout's support folder (`~/Library/Application Support/OpenScout/runtime/operator-attribution.key` on macOS; `OPENSCOUT_ATTRIBUTION_KEY_FILE` names another). Scout Chat reads it once at start and signs each post the way the runtime checks them, so the runtime records the message as yours. The key never leaves the process. Scout 0.5.4 or newer makes the key; an older Scout has none, and Scout Chat then opens read-only and says why.

@@ -3,7 +3,27 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { keyFile, readKey, sign } from "./runtime.mjs";
+import { keyFile, messages, readKey, sign } from "./runtime.mjs";
+
+test("opens an older reply only in its own conversation", async (t) => {
+  const message = { id: "old/reply", conversationId: "room-a", class: "agent", actorId: "alex", createdAt: 1, body: "Earlier reply" };
+  const recent = { ...message, id: "recent", createdAt: 2 };
+  const paths = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const { pathname, searchParams } = new URL(url);
+    paths.push(pathname);
+    if (pathname === "/v1/messages") return Response.json(searchParams.get("conversationId") === "room-a" ? [recent] : []);
+    if (pathname === "/v1/messages/old%2Freply") return Response.json({ message });
+    if (pathname === "/v1/snapshot") return Response.json({ actors: {} });
+    return new Response(null, { status: 404 });
+  });
+  assert.deepEqual((await messages("room-a", { messageId: message.id })).map((m) => m.id), [message.id, recent.id]);
+  assert.deepEqual(await messages("room-b", { messageId: message.id }), []);
+  assert.deepEqual((await messages("room-a", { messageId: "missing" })).map((m) => m.id), [recent.id]);
+  paths.length = 0;
+  await messages("room-a", { messageId: recent.id });
+  assert.ok(!paths.includes("/v1/messages/recent"));
+});
 
 test("signs a post the way Scout's runtime verifies it", () => {
   // Computed with signLocalAdminRequest from Scout core (packages/runtime/src/mesh-access-local-auth.ts).

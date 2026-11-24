@@ -116,8 +116,18 @@ async function actorNames() {
 /** A session actor's own name is its id ("Session Mwrgkgn6 Ewhgmu"); the room's agent name reads better. */
 const sessionish = (id, name) => /^session-/.test(id) || /^Session [A-Za-z0-9]+ [A-Za-z0-9]+$/.test(name || "");
 
-export async function messages(conversationId, { limit = 200, agentName = null } = {}) {
+export async function messages(conversationId, { limit = 200, agentName = null, messageId = null } = {}) {
   const list = await get(`/v1/messages?conversationId=${encodeURIComponent(conversationId)}&limit=${limit}`);
+  // A shared reply may have fallen outside the room's recent history.
+  if (messageId && !list.some((message) => message.id === messageId) && messageId !== "." && messageId !== "..") {
+    const response = await fetch(`${runtimeUrl()}/v1/messages/${encodeURIComponent(messageId)}`, { signal: AbortSignal.timeout(8000) });
+    if (response.ok) {
+      const { message } = await response.json();
+      if (message?.id === messageId && message.conversationId === conversationId) list.push(message);
+    } else if (response.status !== 404) {
+      throw new Error(`Couldn't read the linked message (${response.status}).`);
+    }
+  }
   const map = await actorNames();
   return list.filter((m) => m.class === "agent" || m.class === "artifact").map((m) => ({
     id: m.id,

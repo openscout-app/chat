@@ -12,7 +12,7 @@ const api = async (p, init) => {
   return d;
 };
 
-const state = { rooms: [], current: null, status: null };
+const state = { rooms: [], current: null, message: null, status: null };
 
 function when(t) {
   if (!t) return "";
@@ -53,32 +53,55 @@ function renderRooms() {
 }
 
 let renderToken = 0;
-async function openRoom(id) {
+async function openRoom(id, message = null) {
   state.current = id;
-  history.replaceState(null, "", `#${encodeURIComponent(id)}`);
+  state.message = message;
+  const url = new URL(location.href);
+  if (message) url.searchParams.set("message", message);
+  else url.searchParams.delete("message");
+  url.hash = encodeURIComponent(id);
+  history.replaceState(null, "", url);
   renderRooms();
   const room = state.rooms.find((r) => r.id === id);
   const main = $("#room");
   const log = el("div", { className: "log" }, el("p", { className: "quiet", textContent: "Loading" }));
   const head = el("header", { className: "room-head" },
     el("h1", { textContent: room?.title || id }),
-    el("span", { className: "sub", textContent: room?.kind === "direct"
+    el("span", { className: "sub", textContent: !room ? "Linked discussion" : room.kind === "direct"
       ? `Direct with ${room.agentName || "an agent"}`
       : room?.board ? "A Vercel Board channel" : "Channel" }));
-  main.replaceChildren(head, log, composer(room));
+  main.replaceChildren(head, log);
+  if (room) main.append(composer(room));
   await loadMessages(id, log);
 }
 
 async function loadMessages(id, log = $(".log")) {
   const token = ++renderToken;
   try {
-    const { messages } = await api(`/api/rooms/${encodeURIComponent(id)}/messages`);
+    const linked = state.message;
+    const search = linked ? "?" + new URLSearchParams({ message: linked }) : "";
+    const { messages } = await api(`/api/rooms/${encodeURIComponent(id)}/messages${search}`);
     if (token !== renderToken || state.current !== id) return;
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-    log.replaceChildren(...(messages.length ? messages.map((m) => el("article", { className: `msg${m.mine ? " mine" : ""}` },
+    const articles = messages.map((m) => el("article", { className: `msg${m.mine ? " mine" : ""}` },
       el("div", { className: "who" }, m.name, el("time", { textContent: when(m.at), dateTime: new Date(m.at).toISOString() })),
-      el("div", { className: "body", textContent: m.body }))) : [el("p", { className: "quiet", textContent: "Nothing here yet." })]));
-    if (nearBottom || log.dataset.loaded !== id) log.scrollTop = log.scrollHeight;
+      el("div", { className: "body", textContent: m.body })));
+    const target = linked && articles[messages.findIndex((m) => m.id === linked)];
+    if (target) {
+      target.classList.add("linked");
+      target.setAttribute("aria-label", "Linked message");
+    }
+    const firstRead = log.dataset.loaded !== id;
+    const previousTop = log.scrollTop;
+    log.replaceChildren(...articles);
+    if (linked && !target) {
+      log.prepend(el("p", { className: "link-notice", role: "status", textContent: "The linked message is unavailable in this discussion." }));
+    } else if (!messages.length) {
+      log.append(el("p", { className: "quiet", textContent: state.rooms.some((r) => r.id === id) ? "Nothing here yet." : "This discussion is unavailable." }));
+    }
+    if (target && firstRead) target.scrollIntoView({ block: "center" });
+    else if (linked) log.scrollTop = previousTop;
+    else if (nearBottom || firstRead) log.scrollTop = log.scrollHeight;
     log.dataset.loaded = id;
   } catch (e) {
     if (token === renderToken) log.replaceChildren(el("p", { className: "quiet", textContent: e.message }));
@@ -249,8 +272,13 @@ async function start() {
   $("#status").textContent = !state.status?.runtime ? "Scout's runtime isn't answering. Run scout-chat setup."
     : state.status.canPost ? "" : `Reading only: ${state.status.why}.`;
   await refreshRooms();
-  const fromHash = decodeURIComponent(location.hash.slice(1));
-  if (fromHash && state.rooms.some((r) => r.id === fromHash)) openRoom(fromHash);
+  const openLinkedRoom = () => {
+    let room;
+    try { room = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+    if (room) openRoom(room, new URL(location.href).searchParams.get("message"));
+  };
+  openLinkedRoom();
+  window.addEventListener("hashchange", openLinkedRoom);
 
   let pending = null;
   const events = new EventSource("/api/events");
