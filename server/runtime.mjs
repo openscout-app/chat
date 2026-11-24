@@ -4,7 +4,7 @@
 // created: an owner-only key file under Scout's support folder. Chat reads it when needed and
 // signs each post the way the runtime verifies them (local-admin:v1, HMAC-SHA256). The key never
 // leaves this process and is never printed.
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -71,7 +71,7 @@ async function get(p, ms = 8e3, headers) {
 export async function nodeInfo() {
   const n = await get("/v1/node", 2500);
   if (typeof n?.id !== "string" || !n.id) throw new Error("the runtime didn't name its node");
-  return { id: n.id, name: n.name || n.hostName || "", keyId: n.card?.keyId };
+  return { id: n.id, name: n.name || n.hostName || "", hostName: n.hostName, keyId: n.card?.keyId };
 }
 
 export async function up() {
@@ -119,6 +119,7 @@ export async function rooms(limit = 200) {
     kind: i.kind === "channel" ? "channel" : "direct",
     title: (i.title || i.agentName || i.conversationId).replace(/\s*\(Vercel Board\)$/, ""),
     board: /\(Vercel Board\)$/.test(i.title || ""),
+    askTarget: i.kind !== "channel" && i.agentId ? { id: i.agentId, name: i.agentName || i.agentId } : null,
     agentId: i.agentId || null,
     agentName: i.agentName || null,
     preview: i.preview || "",
@@ -126,6 +127,70 @@ export async function rooms(limit = 200) {
     unread: i.unreadCount || 0,
     state: i.activityState || null,
   }));
+}
+
+// Scout 0.5.4 does not expose its general delivery preflight. Use its receive
+// contracts where there is read-only evidence; never probe by sending an ask.
+function hasReceiveRoute(endpoint, { pairingSessions, sameHost, now }) {
+  const { state, transport, metadata } = endpoint;
+  const busy = ["active", "working", "waiting"].includes(state);
+  if (metadata?.externalSession === true && metadata.t3Session !== true) {
+    // A registered poll mailbox can queue an ask even between polls. External
+    // push transports cannot queue another ask while their recipient is busy.
+    if (transport === "mcp_poll") return busy || ["registered", "online", "idle"].includes(state);
+    if (transport === "http" || transport === "devin_cloud_cli") return state === "online" || state === "idle";
+  }
+  if (transport === "claude_channel" && state === "idle") {
+    const age = now - metadata?.lastSeenAt;
+    return age >= 0 && age < 45_000;
+  }
+  if (transport === "pairing_bridge" && (state === "idle" || busy))
+    return pairingSessions.has(endpoint.sessionId);
+  if (transport === "ghostty" && sameHost && (state === "idle" || busy) &&
+      metadata?.attachedLive === true && metadata.ghosttyTerminalId) {
+    const pid = metadata.livePid;
+    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  }
+  // For tmux, even a live PID cannot confirm that the registered pane still
+  // exists on the same TTY. Leave it out rather than guess.
+  return false;
+}
+
+/** Registered, addressable agents with a confirmed route on this broker. */
+export async function askTargets() {
+  const [snapshot, { endpoints }, node] = await Promise.all([
+    get("/v1/snapshot?scope=agents"), get("/v1/endpoints"), nodeInfo(),
+  ]);
+  const byAgent = new Map();
+  for (const e of endpoints) {
+    if (e.metadata?.staleLocalRegistration || (e.state === "offline" && e.metadata?.replacedByAgentId)) continue;
+    if (!byAgent.has(e.agentId)) byAgent.set(e.agentId, []);
+    byAgent.get(e.agentId).push(e);
+  }
+  const agents = Object.values(snapshot.agents).filter((a) => a.kind === "agent" && a.id &&
+    a.authorityNodeId === node.id && !a.metadata?.retiredFromFleet && !a.metadata?.staleLocalRegistration &&
+    byAgent.has(a.id) && a.capabilities?.some((c) => c === "chat" || c === "invoke"));
+  const pairingSessions = new Set();
+  let pairingError;
+  if (agents.some((a) => byAgent.get(a.id).some((e) => e.transport === "pairing_bridge"))) {
+    try {
+      for (const session of await get("/v1/pairing/sessions"))
+        if (session.externalSessionId && ["idle", "active"].includes(session.status)) pairingSessions.add(session.externalSessionId);
+    } catch (error) { pairingError = error; }
+  }
+  const sameHost = node.hostName === os.hostname() &&
+    ["127.0.0.1", "[::1]", "localhost"].includes(new URL(runtimeUrl()).hostname);
+  const evidence = { sameHost, pairingSessions, now: Date.now() };
+  const confirmed = agents.filter((a) => {
+    // The broker selects a preferred endpoint first. If the choice is
+    // ambiguous, a live sibling cannot vouch for the selected route.
+    const routes = byAgent.get(a.id), preferred = routes.filter((e) => e.preferred === true);
+    return (preferred.length ? preferred : routes).every((e) => e.nodeId === node.id && hasReceiveRoute(e, evidence));
+  });
+  if (!confirmed.length && pairingError) throw pairingError;
+  return confirmed.map((a) => ({ id: a.id, name: a.displayName || a.id }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 let names = { at: 0, map: new Map() };
@@ -169,19 +234,17 @@ export async function messages(conversationId, { limit = 200, agentName = null, 
   })).sort((a, b) => a.at - b.at);
 }
 
-/**
- * Post as the operator. In a direct room the message goes to its agent as a consult, which wakes
- * the agent and opens a flight; in a channel it is a room message.
- */
-export async function post({ room, body }, key) {
+/** Only an addressed consult asks an agent. Everything else posts to the conversation. */
+export async function post({ conversationId, target, body, requestId = randomUUID() }, key) {
   const n = await nodeInfo();
   if (!n.keyId) throw new Error("the runtime didn't name its key, so a post can't be signed");
-  const createdAt = Date.now(), id = `chat-${createdAt.toString(36)}-${randomBytes(4).toString("hex")}`;
-  const [p, payload] = room.kind === "direct" && room.agentId
-    ? ["/v1/deliver", { id, requesterId: "operator", requesterNodeId: n.id, targetAgentId: room.agentId, body,
-      intent: "consult", ensureAwake: true, createdAt, messageMetadata: { source: "scout-chat" } }]
-    : ["/v1/messages", { id, requestId: id, conversationId: room.id, actorId: "operator", originNodeId: n.id,
-      class: "agent", body, visibility: "workspace", policy: "durable", createdAt, metadata: { source: "scout-chat" } }];
+  const id = `chat-${requestId}`;
+  // The broker fingerprints consult payloads for replay. Leave their timestamp to it.
+  const [p, payload] = target
+    ? ["/v1/deliver", { id, requestId, requesterId: "operator", requesterNodeId: n.id, targetAgentId: target.id, body,
+      intent: "consult", ensureAwake: true, messageMetadata: { source: "scout-chat" } }]
+    : ["/v1/messages", { id, requestId, conversationId, actorId: "operator", originNodeId: n.id,
+      class: "agent", body, visibility: "workspace", policy: "durable", createdAt: Date.now(), metadata: { source: "scout-chat" } }];
   const text = JSON.stringify(payload);
   const res = await fetch(`${runtimeUrl()}${p}`, {
     method: "POST",
@@ -192,32 +255,47 @@ export async function post({ room, body }, key) {
   });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || out.message || `the runtime refused the post (${res.status})`);
-  if (out.kind && out.kind !== "delivery") throw new Error(out.reason || out.message || "the runtime didn't deliver it");
-  return { id };
+  if (target) {
+    const roomId = out.receipt?.conversationId || out.conversation?.id;
+    const messageId = out.receipt?.messageId || out.message?.id;
+    if (out.kind !== "delivery" || out.accepted !== true || !roomId || !messageId)
+      throw new Error(out.reason || "Scout didn't confirm acceptance of the ask.");
+    const actualId = out.receipt?.targetAgentId || out.targetAgentId || target.id;
+    return { kind: "ask", requestId, id: messageId, conversationId: roomId,
+      agent: actualId === target.id ? target.name : actualId };
+  }
+  if (out.ok !== true || !out.message?.id) throw new Error("Scout didn't confirm the post.");
+  return { kind: "post", requestId, conversationId, id: out.message.id };
 }
 
-/** Follow the runtime's event stream and call fn with each posted message's conversation id. */
-export function follow(fn) {
+/** Relay both messages and gaps in the upstream stream, even while the browser stays connected. */
+export function follow({ onMessage, onConnection, onTargets }) {
   const lifetime = new AbortController();
   (async function loop(n = 0) {
     while (!lifetime.signal.aborted) {
       try {
         const res = await fetch(`${runtimeUrl()}/v1/events/stream`, { signal: lifetime.signal });
-        if (!res.ok || !res.body) throw new Error(String(res.status));
+        if (!res.ok || !res.body) { await res.body?.cancel(); throw new Error(String(res.status)); }
+        onConnection("connected");
         n = 0;
+        const decoder = new TextDecoder();
         let buf = "", ev = "";
         for await (const chunk of res.body) {
-          buf += Buffer.from(chunk).toString("utf8");
+          buf += decoder.decode(chunk, { stream: true });
           let i;
           while ((i = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, i).replace(/\r$/, ""); buf = buf.slice(i + 1);
             if (line.startsWith("event:")) ev = line.slice(6).trim();
             else if (line.startsWith("data:") && (ev === "message.posted" || ev === "message.corrected")) {
-              try { const d = JSON.parse(line.slice(5)); fn(d.payload?.message?.conversationId || d.message?.conversationId || null); } catch {}
+              try { const d = JSON.parse(line.slice(5)); onMessage(d.payload?.message?.conversationId || d.message?.conversationId || null); } catch {}
+            } else if (line.startsWith("data:") && (ev === "agent.registered" || ev.startsWith("agent.endpoint."))) {
+              onTargets();
             } else if (!line) ev = "";
           }
         }
       } catch {}
+      if (lifetime.signal.aborted) break;
+      onConnection("reconnecting");
       await sleep(Math.min(30e3, 1e3 * 2 ** Math.min(n++, 5)), undefined, { signal: lifetime.signal }).catch(() => {});
     }
   })();

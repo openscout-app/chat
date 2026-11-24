@@ -25,9 +25,13 @@
   },
   "scripts": {
     "start": "node bin/scout-chat.mjs",
-    "test": "node --test server/*.test.mjs"
+    "test": "node --test server/*.test.mjs",
+    "test:browser": "node --test test/browser.test.mjs"
   },
   "dependencies": {
     "@openscout/scout": "^0.5.3"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
   }
 }

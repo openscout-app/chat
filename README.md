@@ -1,8 +1,10 @@
 # Scout Chat
 
-Your rooms with your agents, on Scout. Channels you share with agents, direct conversations with one agent, and the rooms Scout keeps for a Vercel Board, in one local page. What you write goes through Scout's runtime, in your name.
+Your rooms with your agents, on Scout. Shared channels, direct conversations and Vercel Board rooms in one local page. What you write goes through Scout's runtime, in your name.
 
-A direct room is one agent: what you write there wakes it, and its answer comes back to the room. A channel is a room you share; a message there is posted to everyone in it. New messages arrive as they are posted, from any agent, the CLI, or another Scout app.
+In a direct room with an agent target, **Ask** sends a request to that agent. Its receipt confirms acceptance, not an answer. In channels and rooms without a target, **Post to room** adds a message without asking an agent. New messages arrive from agents, the CLI and other Scout apps.
+
+With no rooms yet, **Ask an agent** lists agents whose receive route Chat can confirm. Scout 0.5.4 does not expose every check it makes at dispatch: a name on Home, a tmux registration, or permission to launch an agent is not enough. If your agent is not listed, start the conversation with `scout ask`; its room will appear in Chat.
 
 ## Run it
 
@@ -42,6 +44,8 @@ npm start
 npm test
 ```
 
+The browser regression tests use an isolated runtime fixture and an installed Google Chrome. Run them with `npm run test:browser`. Chat itself does not need Chrome.
+
 ## Connect a Vercel Board
 
 Choose **Add a Vercel Board** in the sidebar. Enter the team ID, slug, or Board API URL and the name of a local `secret_cli` entry. Store the token in the entry first; do not paste it into Chat. Chat refreshes the room list as Board channels sync.
@@ -75,6 +79,8 @@ Slack also needs Scout's Slack companion on the host, which carries Slack's even
 
 A discussion link can open a room at a particular message. The URL takes the
 form `/?message=<message-id>#<conversation-id>`, with each ID URL-encoded.
+Without a link, Chat opens the last room you viewed if it is still listed, or the only room if there is one. On narrow screens, **Rooms** takes you back to the list. Drafts stay with their rooms while the page is open.
+
 Chat also looks up older linked messages outside the recent history. If the
 target is unavailable, the room says so. A room-only link still uses
 `/#<conversation-id>`.
@@ -87,7 +93,7 @@ The server listens on 127.0.0.1 only. It takes a post only from its own page: th
 
 ## How it finds Scout
 
-Scout Chat finds the runtime the way Scout's own tools do: `SCOUT_RUNTIME_URL` or `OPENSCOUT_BROKER_URL` if set, else the host and port in `~/.openscout/config.json`, else `127.0.0.1:43110`. It reads rooms from `/v1/conversation-projection`, messages from `/v1/messages`, and follows `/v1/events/stream` for new ones. A post in a direct room goes to `/v1/deliver` as a consult to its agent; a post in a channel goes to `/v1/messages`. Sessions Scout only observes, such as a Claude Code transcript, are not rooms and don't appear.
+Scout Chat finds the runtime the way Scout's own tools do: `SCOUT_RUNTIME_URL` or `OPENSCOUT_BROKER_URL` if set, else the host and port in `~/.openscout/config.json`, else `127.0.0.1:43110`. It reads rooms from `/v1/conversation-projection`, messages from `/v1/messages`, and follows `/v1/events/stream` for new ones. An ask goes to `/v1/deliver`; a room post goes to `/v1/messages`. If a send has no receipt, sending the same text to the same target again reuses its request ID. Sessions Scout only observes, such as a Claude Code transcript, are not rooms and don't appear.
 
 `npx github:openscout-app/chat status` says whether the runtime is up, whether Chat can post in your name, and whether this host can connect a Board or start Slack setup.
 
