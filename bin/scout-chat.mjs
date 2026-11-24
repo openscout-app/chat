@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npx github:openscout-app/chat [--port 4802] [--no-open]       start Scout Chat and open it
+// npx github:openscout-app/chat [--port 4804] [--no-open]       start Scout Chat and open it
 // npx github:openscout-app/chat setup                            start Scout's runtime if it isn't up
 // npx github:openscout-app/chat connect board --team <team> --credential <ref>
 // npx github:openscout-app/chat connect slack --project <path>
@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const HELP = `Usage:
   scout-chat [--port <n>] [--no-open]
-      Your rooms with your agents, at http://localhost:4802: channels, direct conversations, and
+      Your rooms with your agents, at http://localhost:4804: channels, direct conversations, and
       the rooms Scout keeps for a Vercel Board. What you write goes through Scout's runtime, in your
       name.
 
@@ -52,10 +52,9 @@ if (args[0] === "setup" || args[0] === "init") {
 }
 
 if (args[0] === "status") {
-  const up = await rt.up();
-  const k = rt.readKey();
-  console.log(`Runtime:  ${up ? `up at ${rt.runtimeUrl()}` : "not answering (scout-chat setup starts it)"}`);
-  console.log(`Posting:  ${k.key ? "in your name" : `off: ${k.problem}`}`);
+  const status = await rt.readiness();
+  console.log(`Runtime:  ${status.runtime ? `up at ${status.runtime}` : "not answering (scout-chat setup starts it)"}`);
+  console.log(`Posting:  ${status.canPost ? "in your name" : `off: ${status.why}`}`);
   const { board, slack } = await integrations.status();
   console.log(`Board:    ${board.message || "available on this host"}`);
   console.log(`Slack:    ${slack.message || "setup available on this host"}`);
@@ -78,40 +77,16 @@ if (args[0] === "connect") {
 
 if (args[0] && !args[0].startsWith("-")) fail(`no command ${args[0]}. See scout-chat --help.`);
 
-// start
-const { createServer } = await import("../server/serve.mjs");
-const want = Number(opt("--port") || process.env.SCOUT_CHAT_PORT || 4802);
-if (!Number.isInteger(want) || want <= 0 || want > 65535) fail("--port takes a port number.");
-const open = (url) => { if (!args.includes("--no-open") && process.platform === "darwin") execFile("open", [url], () => {}); };
-
-async function ours(port) {
-  try {
-    const r = await fetch(`http://127.0.0.1:${port}/api/status`, { signal: AbortSignal.timeout(1500) });
-    const d = await r.json();
-    return r.ok && "canPost" in d;
-  } catch { return false; }
-}
-if (await ours(want)) {
-  const url = `http://localhost:${want}`;
-  console.log(`Scout Chat is already running at ${url}`);
-  open(url);
-  process.exit(0);
-}
-
-const k = rt.readKey();
-if (!(await rt.up())) console.log("Scout's runtime isn't answering yet. Rooms appear once it's up: scout-chat setup starts it.");
-if (!k.key) console.log(`Reading only: ${k.problem}.`);
-
-function listen(port, tries = 10) {
-  const server = createServer({ port, key: k.key, keyProblem: k.problem });
-  server.once("error", (e) => {
-    if (e.code === "EADDRINUSE" && tries > 1) return listen(port + 1, tries - 1);
-    fail(e.code === "EADDRINUSE" ? `ports ${want} to ${port} are taken. Pass --port.` : e.message);
-  });
-  server.listen(port, "127.0.0.1", () => {
-    const url = `http://localhost:${port}`;
-    console.log(`Scout Chat: ${url}`);
-    open(url);
-  });
-}
-listen(want);
+// Pin the runtime selected at launch so reuse and subsequent API calls agree.
+process.env.SCOUT_RUNTIME_URL = rt.runtimeUrl();
+const { serve } = await import("../server/serve.mjs");
+const { portOptions, start } = await import("../server/local.mjs");
+try {
+  const result = await start({ ...portOptions(args, process.env.SCOUT_CHAT_PORT), serve });
+  console.log(result.reused ? `Scout Chat is already running at ${result.url}` : `Scout Chat: ${result.url}`);
+  if (!args.includes("--no-open") && process.platform === "darwin") execFile("open", [result.url], () => {});
+  if (result.reused) process.exit(0);
+  const status = await rt.readiness();
+  if (!status.runtime) console.log("Scout's runtime isn't answering yet. Rooms appear once it's up: scout-chat setup starts it.");
+  else if (!status.canPost) console.log(`Posting off: ${status.why}.`);
+} catch (e) { fail(e.message); }
