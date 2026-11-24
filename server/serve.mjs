@@ -67,10 +67,17 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
         }
       }
       if (p === "/api/rooms") return json(res, 200, { rooms: await rt.rooms() });
-      const m = p.match(/^\/api\/rooms\/([A-Za-z0-9._:-]+)\/messages$/);
+      const m = p.match(/^\/api\/rooms\/([^/]+)\/messages$/);
+      let roomId;
+      if (m) {
+        try { roomId = decodeURIComponent(m[1]); } catch { return json(res, 400, { error: "Invalid room address." }); }
+      }
       if (m && req.method === "GET") {
-        const room = (await rt.rooms()).find((r) => r.id === m[1]);
-        return json(res, 200, { messages: await rt.messages(m[1], { agentName: room?.kind === "direct" ? room.agentName : null }) });
+        const room = (await rt.rooms()).find((r) => r.id === roomId);
+        return json(res, 200, { messages: await rt.messages(roomId, {
+          agentName: room?.kind === "direct" ? room.agentName : null,
+          messageId: url.searchParams.get("message"),
+        }) });
       }
       if (m && req.method === "POST") {
         if (!jsonWrite(req.headers, localPort)) return json(res, 403, { error: "posts come from this page only" });
@@ -79,7 +86,7 @@ export function createServer({ port, key, keyProblem, integrations = defaultInte
         const { body } = await readBody(req);
         const text = typeof body === "string" ? body.trim() : "";
         if (!text) return json(res, 400, { error: "write something first" });
-        const room = (await rt.rooms()).find((r) => r.id === m[1]);
+        const room = (await rt.rooms()).find((r) => r.id === roomId);
         if (!room) return json(res, 404, { error: "that room isn't on this host" });
         return json(res, 200, await rt.post({ room, body: text }, key));
       }
