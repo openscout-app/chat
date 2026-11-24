@@ -36,22 +36,43 @@ function setText(node, value) {
   if (node.textContent !== value) node.textContent = value;
 }
 
+// A DOM move can reset the selection even when the text nodes survive. A cloned
+// Range is live too, so remember its endpoints and direction before moving rows.
+function rememberInteraction(parent) {
+  const active = parent.contains(document.activeElement) ? document.activeElement : null;
+  const selection = getSelection();
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+  const selected = !selection.isCollapsed && (active || parent.contains(anchorNode) || parent.contains(focusNode));
+  return () => {
+    if (active?.isConnected && document.activeElement !== active) active.focus({ preventScroll: true });
+    if (selected && anchorNode.isConnected && focusNode.isConnected &&
+        (selection.anchorNode !== anchorNode || selection.anchorOffset !== anchorOffset ||
+         selection.focusNode !== focusNode || selection.focusOffset !== focusOffset)) {
+      const offset = (node, n) => Math.min(n, node.length ?? node.childNodes.length);
+      selection.setBaseAndExtent(anchorNode, offset(anchorNode, anchorOffset), focusNode, offset(focusNode, focusOffset));
+    }
+  };
+}
+
 // Leave unchanged nodes (and their text, focus and selection) in the document.
 function patchList(parent, items, create, update) {
   const byId = new Map(Array.from(parent.children, (node) => [node.dataset.id, node]));
   const keep = new Set(items.map((item) => item.id));
   for (const [id, node] of byId) if (!keep.has(id)) node.remove();
+  let restore;
   let next = parent.firstElementChild;
   for (const item of items) {
     const node = byId.get(item.id) || create(item);
     node.dataset.id = item.id;
     update(node, item);
     if (node !== next) {
+      if (node.parentNode) restore ??= rememberInteraction(parent);
       if (node.parentNode && parent.moveBefore) parent.moveBefore(node, next);
       else parent.insertBefore(node, next);
     }
     next = node.nextElementSibling;
   }
+  restore?.();
 }
 
 function roomURL(id) {
@@ -91,6 +112,7 @@ function remember(id) {
 function syncLocation(focus = false, load = true) {
   const { id, message } = readLocation();
   if (state.current === id && state.message === message) return;
+  if (id && askPanel.open) askPanel.close();
   const previous = state.current;
   state.current = id;
   state.message = message;
@@ -190,19 +212,37 @@ async function send(path, payload) {
     throw err;
   }
 }
-const roomComposer = composer({ el, drafts, submit: send, accepted(to) {
-  if (state.current === to.id) loadMessages();
+function roomDestination(room) {
+  if (!room) return null;
+  const { id, askTarget: target } = room;
+  const key = "room:" + id;
+  const agentKey = target && "agent:" + target.id;
+  const first = drafts.get(agentKey);
+  // Discovery isn't a receipt. Move the original attempt (including its send
+  // guard and retry ID) when the operator enters the matching direct room.
+  if (!drafts.has(key) && (first?.pending || first?.retry)) {
+    drafts.set(key, first);
+    drafts.delete(agentKey);
+  }
+  return { id, key, target, path: `/api/rooms/${encodeURIComponent(id)}/messages` };
+}
+
+const roomComposer = composer({ el, drafts, submit: send, settled(to, receipt) {
+  if (receipt && state.current === to.id) loadMessages();
 }});
-const askComposer = composer({ el, drafts, submit: send, accepted(to, receipt, draft) {
+const askComposer = composer({ el, drafts, submit: send, settled(to, receipt, draft) {
+  // The room may now own this draft and needs to show the failed send as retryable.
+  if (!receipt) { render(); return; }
   const id = receipt.conversationId;
   if (id) {
     // The room can appear over SSE before the HTTP receipt comes back.
     const existing = drafts.get("room:" + id);
-    if (existing) {
+    if (existing && existing !== draft) {
       if (draft.text) existing.text += (existing.text ? "\n" : "") + draft.text;
       existing.notice = draft.notice;
     } else drafts.set("room:" + id, draft);
-    drafts.delete(to.key);
+    // Keep just the authoritative room binding if the receipt names a different room.
+    for (const [key, owner] of drafts) if (owner === draft && key !== "room:" + id) drafts.delete(key);
     if (askPanel.open && askSelect.value === to.target.id) {
       askPanel.close();
       navigate(id);
@@ -285,7 +325,7 @@ function render() {
     setText($(".room-head .sub"), !room ? "Linked discussion" : target ? `Direct with ${target.name}`
       : room.board ? "Vercel Board channel" : room.kind === "direct" ? "Direct room" : "Channel");
   } else if (recovery.parentNode !== empty) empty.append(recovery);
-  roomComposer.show(room && { id, key: "room:" + id, path: `/api/rooms/${encodeURIComponent(id)}/messages`, target }, postingProblem());
+  roomComposer.show(roomDestination(room), postingProblem());
   setText($("#host"), state.status?.host ? `on ${state.status.host}` : "");
   renderRooms();
   renderStatus();

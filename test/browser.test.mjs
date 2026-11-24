@@ -14,10 +14,15 @@ const room = (conversationId, kind = "channel", fields = {}) => ({ conversationI
 const msg = (id, body, createdAt = 1) => ({ id, body, createdAt, class: "agent", actorId: "reader" });
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { resolve, promise }; };
 
+function messageEvent(f, conversationId) {
+  for (const stream of f.streams)
+    stream.write(`event: message.posted\ndata: ${JSON.stringify({ message: { conversationId } })}\n\n`);
+}
+
 // Exercise the actual page, local API, signed route selection and both SSE hops.
 // Only the upstream runtime is a fixture; never read or write operator records.
 async function fixture(t, settings = {}) {
-  const f = Object.assign({ rooms: [], agents: {}, endpoints: [], messages: {}, writes: [], streams: new Set(),
+  const f = Object.assign({ rooms: [], agents: {}, homeAgents: [], messages: {}, writes: [], streams: new Set(),
     online: true, streamUp: true, readsUp: true, writable: true, statusReads: 0 }, settings);
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://fixture.invalid");
@@ -41,7 +46,7 @@ async function fixture(t, settings = {}) {
       if (proof && (!f.writable || proof === "invalid")) return json(401, { error: "invalid_local_admin_proof" });
       return json(200, { items: f.rooms });
     }
-    if (url.pathname === "/v1/endpoints") return json(200, { endpoints: f.endpoints });
+    if (url.pathname === "/v1/home") return json(200, { agents: f.homeAgents });
     if (url.pathname === "/v1/snapshot") return json(200, { agents: f.agents, actors: {} });
     if (url.pathname === "/v1/messages" && req.method === "GET")
       return json(f.readsUp ? 200 : 503, f.messages[url.searchParams.get("conversationId")] || []);
@@ -159,6 +164,7 @@ test("a cold start distinguishes setup, no target and a real first ask", async (
   await p.getByText("Connect an agent to Scout to start a room.").waitFor();
   assert.equal(await p.getByRole("button", { name: "Ask an agent" }).isVisible(), false);
   f.agents.reader = { id: "reader", kind: "agent", displayName: "Reader", capabilities: ["invoke"], wakePolicy: "on_demand" };
+  f.homeAgents = [{ id: "reader", reachable: true }];
   f.streamUp = true; // The upstream connection event refreshes the real target list.
   await p.getByRole("button", { name: "Ask an agent" }).click();
   const field = p.getByRole("textbox", { name: "Ask Reader" });
@@ -189,7 +195,7 @@ test("linked, remembered and sole rooms respect index history and the 720px brea
   await p.goto(f.url);
   await p.waitForURL("**/#two");
   await p.goto(f.url + "/?message=gone#one");
-  await p.getByText("The linked message is unavailable in this discussion.").waitFor();
+  await p.getByRole("status").filter({ hasText: "The linked message is unavailable in this discussion." }).waitFor();
   assert.equal(await p.locator(".room-head h1").textContent(), "one");
   await p.setViewportSize({ width: 720, height: 700 });
   await two.waitFor();
@@ -216,7 +222,7 @@ test("upstream reconnect keeps the good DOM, rechecks readiness and catches up t
   f.streamUp = f.readsUp = false;
   for (const res of f.streams) res.end();
   await p.getByText("Reconnecting…", { exact: true }).waitFor();
-  await p.waitForFunction(() => document.querySelector("textarea").disabled);
+  await p.waitForFunction(() => document.querySelector("textarea").readOnly);
   assert.equal(await p.getByText("No rooms yet", { exact: true }).isVisible(), false);
   assert.equal(await p.getByRole("link", { name: "one" }).isVisible(), true);
   assert.equal(await p.locator("#messages article").count(), 2);
@@ -228,7 +234,7 @@ test("upstream reconnect keeps the good DOM, rechecks readiness and catches up t
   assert.equal(await p.evaluate(() => window.firstArticle === document.querySelector("article")), true);
   assert.equal(await p.evaluate(() => getSelection().toString()), "Keep this text");
   assert.equal(await p.evaluate(() => document.activeElement.className), "log");
-  assert.equal(await p.getByRole("textbox", { name: "Post to room" }).isEnabled(), true);
+  assert.equal(await p.getByRole("textbox", { name: "Post to room" }).isEditable(), true);
 });
 
 test("reopening the browser stream repairs missed data even if the runtime stream stayed up", async (t) => {
@@ -242,7 +248,7 @@ test("reopening the browser stream repairs missed data even if the runtime strea
   f.writable = false;
   f.messages.one.push(msg("b", "After", 2));
   await p.getByText("After", { exact: true }).waitFor();
-  await p.waitForFunction(() => document.querySelector("textarea").disabled);
+  await p.waitForFunction(() => document.querySelector("textarea").readOnly);
   assert.ok(f.statusReads > reads);
 });
 
@@ -299,4 +305,94 @@ test("a changed recipient cannot turn a room post into an unnoticed ask", async 
   await updated.waitFor();
   assert.equal(await updated.inputValue(), "For the room");
   assert.equal(f.writes.length, 0);
+});
+
+for (const timing of ["before", "after"]) {
+  test(`a first ask keeps its draft and request ID when the HTTP receipt is lost ${timing} entering the new room`, async (t) => {
+    const f = await fixture(t, { agents: { reader: { id: "reader", kind: "agent", displayName: "Reader", capabilities: ["invoke"] } },
+      homeAgents: [{ id: "reader", reachable: true }] });
+    const p = f.page, loseReceipt = deferred();
+    t.after(() => loseReceipt.resolve());
+    await p.route("**/api/ask", async (route) => {
+      // Scout accepted and created the room. Delay only the browser's HTTP receipt.
+      await route.fetch();
+      messageEvent(f, "direct");
+      await loseReceipt.promise;
+      await route.abort();
+    });
+    await p.goto(f.url);
+    await p.getByRole("button", { name: "Ask an agent" }).click();
+    const dialog = p.getByRole("dialog");
+    const original = dialog.getByRole("textbox", { name: "Ask Reader" });
+    await original.fill("Read the draft");
+    await original.press("Enter");
+    const link = p.locator('.item[data-id="direct"]');
+    await link.waitFor();
+    if (timing === "before") {
+      loseReceipt.resolve();
+      await dialog.getByText(/No receipt/).waitFor();
+    }
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await link.click();
+    const field = p.locator("#room-composer textarea");
+    assert.equal(await field.inputValue(), "Read the draft");
+    if (timing === "after") {
+      assert.ok(await p.locator("#room-composer .send").isDisabled());
+      await field.press("Enter");
+      assert.equal(f.writes.length, 1);
+      loseReceipt.resolve();
+    }
+    await p.locator("#room-composer").getByText(/No receipt/).waitFor();
+    await field.press("Enter");
+    await p.getByText("Ask accepted by Reader", { exact: true }).waitFor();
+    assert.equal(await field.inputValue(), "");
+    assert.equal(f.writes.length, 2);
+    assert.ok(f.writes[0].payload.requestId);
+    assert.deepEqual(f.writes[0], f.writes[1], "the broker sees one logical ask");
+  });
+}
+
+for (const method of ["native move", "insertBefore"]) {
+  test(`an SSE room reorder preserves link focus and selection (${method})`, async (t) => {
+    const f = await fixture(t, { rooms: [room("Alpha"), room("Bravo"), room("Charlie")] });
+    const p = f.page;
+    await p.goto(f.url);
+    if (method === "insertBefore") await p.locator("#channels > div").evaluate((list) => { list.moveBefore = undefined; });
+    const bravo = p.getByRole("link", { name: "Bravo" });
+    await bravo.focus();
+    await bravo.evaluate((link) => {
+      const text = link.querySelector(".title span").firstChild;
+      getSelection().setBaseAndExtent(text, 4, text, 1);
+    });
+    f.rooms = [f.rooms[1], f.rooms[2], f.rooms[0]];
+    messageEvent(f, "Bravo");
+    await p.waitForFunction(() => document.querySelector(".item").dataset.id === "Bravo");
+    assert.deepEqual(await bravo.evaluate((link) => {
+      const text = link.querySelector(".title span").firstChild, s = getSelection();
+      return [document.activeElement === link, s.anchorNode === text, s.anchorOffset, s.focusNode === text, s.focusOffset, s.toString()];
+    }), [true, true, 4, true, 1, "rav"]);
+  });
+}
+
+test("a focused draft stays focused and cannot submit during a runtime outage", async (t) => {
+  const f = await fixture(t, { rooms: [room("one")] });
+  const p = f.page, field = p.getByRole("textbox", { name: "Post to room" });
+  await p.goto(f.url);
+  await field.fill("Not sent yet");
+  await field.evaluate((ta) => ta.setSelectionRange(4, 8));
+  const focusAndSelection = () => field.evaluate((ta) => [document.activeElement === ta, ta.selectionStart, ta.selectionEnd]);
+  f.online = false;
+  for (const stream of f.streams) stream.end();
+  await p.waitForFunction(() => document.querySelector("#room-composer textarea").readOnly);
+  assert.deepEqual(await focusAndSelection(), [true, 4, 8]);
+  assert.ok(await p.locator("#room-composer .send").isDisabled());
+  await p.keyboard.press("Enter");
+  assert.equal(f.writes.length, 0);
+  f.online = true;
+  await p.waitForFunction(() => !document.querySelector("#room-composer textarea").readOnly);
+  assert.deepEqual(await focusAndSelection(), [true, 4, 8]);
+  assert.equal(await field.inputValue(), "Not sent yet");
+  await p.keyboard.press("Enter");
+  await p.getByText("Posted to room", { exact: true }).waitFor();
+  assert.equal(f.writes.length, 1);
 });

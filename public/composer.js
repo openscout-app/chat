@@ -11,7 +11,7 @@ const sendGlyph = () => {
 };
 
 // One mounted field can switch destinations; in-flight work belongs to its draft, not the DOM.
-export function composer({ el, drafts, submit, accepted }) {
+export function composer({ el, drafts, submit, settled }) {
   let destination, draft, problem;
   const ta = el("textarea", { rows: 1 });
   const send = el("button", { className: "send", type: "submit" }, sendGlyph());
@@ -22,7 +22,7 @@ export function composer({ el, drafts, submit, accepted }) {
     if (ta.value !== draft.text) ta.value = draft.text;
     ta.style.height = "auto";
     ta.style.height = `${Math.min(ta.scrollHeight, 180)}px`;
-    ta.disabled = !!problem;
+    ta.readOnly = !!problem;
     send.disabled = !!problem || !!draft.pending || !draft.text.trim();
     const status = draft.pending ? "Sending…" : problem || draft.notice;
     if (hint.textContent !== status) hint.textContent = status;
@@ -35,6 +35,7 @@ export function composer({ el, drafts, submit, accepted }) {
   ta.addEventListener("input", () => {
     draft.text = ta.value;
     if (!draft.pending && draft.retry?.body !== draft.text.trim()) {
+      draft.retry = null;
       draft.notice = "";
       draft.error = false;
     }
@@ -76,7 +77,7 @@ export function composer({ el, drafts, submit, accepted }) {
       owner.pending = null;
       if (owner === draft) paint();
     }
-    if (!owner.error) accepted(to, receipt, owner);
+    settled(to, owner.error ? null : receipt, owner);
   });
   return {
     form,

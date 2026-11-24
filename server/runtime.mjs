@@ -131,10 +131,12 @@ export async function rooms(limit = 200) {
 
 /** Registered targets only. An actor name in message history isn't an address. */
 export async function askTargets() {
-  const [snapshot, { endpoints }] = await Promise.all([get("/v1/snapshot?scope=agents"), get("/v1/endpoints")]);
-  const live = new Set(endpoints.filter((e) => ["active", "idle", "working", "waiting"].includes(e.state)).map((e) => e.agentId));
+  // Use the broker's reachability projection, not a raw endpoint state or a wake
+  // policy. The latter is permission to launch, not evidence of a launcher.
+  const [snapshot, home] = await Promise.all([get("/v1/snapshot?scope=agents"), get("/v1/home")]);
+  const live = new Set(home.agents.filter((a) => a.reachable === true).map((a) => a.id));
   return Object.values(snapshot.agents).filter((a) => a.kind === "agent" && a.id &&
-    (live.has(a.id) || a.wakePolicy === "on_demand" || a.wakePolicy === "keep_warm") &&
+    live.has(a.id) &&
     a.capabilities?.some((c) => c === "chat" || c === "invoke"))
     .map((a) => ({ id: a.id, name: a.displayName || a.id }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));

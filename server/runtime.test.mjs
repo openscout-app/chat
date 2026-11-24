@@ -58,15 +58,16 @@ test("reads only an owner-only key, and says why not otherwise", () => {
   fs.rmSync(dir, { recursive: true });
 });
 
-test("first asks offer only registered agents that can chat and are live or wakeable", async (t) => {
-  const agent = (id, data) => ({ kind: "agent", id, capabilities: ["chat"], wakePolicy: "manual", ...data });
+test("first asks require a chat-capable agent the broker reports as reachable, not a wake policy", async (t) => {
+  const agent = (id, data) => ({ kind: "agent", id, capabilities: ["chat"], ...data });
   const snapshot = { agents: {
-    awake: agent("awake"), wakeable: agent("wakeable", { wakePolicy: "on_demand" }),
-    offline: agent("offline"), stale: agent("stale"), unrelated: agent("unrelated", { capabilities: ["listen"] }),
+    awake: agent("awake"), onDemand: agent("onDemand", { wakePolicy: "on_demand" }),
+    keepWarm: agent("keepWarm", { wakePolicy: "keep_warm" }), unrelated: agent("unrelated", { capabilities: ["listen"] }),
   } };
-  const endpoints = [{ agentId: "awake", state: "idle" }, { agentId: "stale", state: "stopped" }, { agentId: "unrelated", state: "active" }];
-  t.mock.method(globalThis, "fetch", async (url) => Response.json(new URL(url).pathname === "/v1/endpoints" ? { endpoints } : snapshot));
-  assert.deepEqual((await askTargets()).map((a) => a.id), ["awake", "wakeable"]);
+  const home = { agents: [{ id: "awake", reachable: true }, { id: "keepWarm", reachable: false },
+    { id: "unrelated", reachable: true }] };
+  t.mock.method(globalThis, "fetch", async (url) => Response.json(new URL(url).pathname === "/v1/home" ? home : snapshot));
+  assert.deepEqual((await askTargets()).map((a) => a.id), ["awake"]);
 });
 
 test("receipt names the accepted target and rejects unconfirmed responses on either route", async (t) => {
