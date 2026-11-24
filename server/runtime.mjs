@@ -71,7 +71,7 @@ async function get(p, ms = 8e3, headers) {
 export async function nodeInfo() {
   const n = await get("/v1/node", 2500);
   if (typeof n?.id !== "string" || !n.id) throw new Error("the runtime didn't name its node");
-  return { id: n.id, name: n.name || n.hostName || "", keyId: n.card?.keyId };
+  return { id: n.id, name: n.name || n.hostName || "", hostName: n.hostName, keyId: n.card?.keyId };
 }
 
 export async function up() {
@@ -129,16 +129,68 @@ export async function rooms(limit = 200) {
   }));
 }
 
-/** Registered targets only. An actor name in message history isn't an address. */
+// Scout 0.5.4 does not expose its general delivery preflight. Use its receive
+// contracts where there is read-only evidence; never probe by sending an ask.
+function hasReceiveRoute(endpoint, { pairingSessions, sameHost, now }) {
+  const { state, transport, metadata } = endpoint;
+  const busy = ["active", "working", "waiting"].includes(state);
+  if (metadata?.externalSession === true && metadata.t3Session !== true) {
+    // A registered poll mailbox can queue an ask even between polls. External
+    // push transports cannot queue another ask while their recipient is busy.
+    if (transport === "mcp_poll") return busy || ["registered", "online", "idle"].includes(state);
+    if (transport === "http" || transport === "devin_cloud_cli") return state === "online" || state === "idle";
+  }
+  if (transport === "claude_channel" && state === "idle") {
+    const age = now - metadata?.lastSeenAt;
+    return age >= 0 && age < 45_000;
+  }
+  if (transport === "pairing_bridge" && (state === "idle" || busy))
+    return pairingSessions.has(endpoint.sessionId);
+  if (sameHost && (state === "idle" || busy) && metadata?.attachedLive === true &&
+      ((transport === "tmux" && endpoint.pane?.trim()) || (transport === "ghostty" && metadata.ghosttyTerminalId))) {
+    // Same non-signalling PID check Scout uses for an explicitly attached terminal.
+    const pid = metadata.livePid;
+    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  }
+  // A bare tmux registration is not a live session. Do not infer a process
+  // or a verified launcher from its state, session name or wake policy.
+  return false;
+}
+
+/** Registered, addressable agents with a confirmed route on this broker. */
 export async function askTargets() {
-  // Use the broker's reachability projection, not a raw endpoint state or a wake
-  // policy. The latter is permission to launch, not evidence of a launcher.
-  const [snapshot, home] = await Promise.all([get("/v1/snapshot?scope=agents"), get("/v1/home")]);
-  const live = new Set(home.agents.filter((a) => a.reachable === true).map((a) => a.id));
-  return Object.values(snapshot.agents).filter((a) => a.kind === "agent" && a.id &&
-    live.has(a.id) &&
-    a.capabilities?.some((c) => c === "chat" || c === "invoke"))
-    .map((a) => ({ id: a.id, name: a.displayName || a.id }))
+  const [snapshot, { endpoints }, node] = await Promise.all([
+    get("/v1/snapshot?scope=agents"), get("/v1/endpoints"), nodeInfo(),
+  ]);
+  const byAgent = new Map();
+  for (const e of endpoints) {
+    if (e.metadata?.staleLocalRegistration || (e.state === "offline" && e.metadata?.replacedByAgentId)) continue;
+    if (!byAgent.has(e.agentId)) byAgent.set(e.agentId, []);
+    byAgent.get(e.agentId).push(e);
+  }
+  const agents = Object.values(snapshot.agents).filter((a) => a.kind === "agent" && a.id &&
+    a.authorityNodeId === node.id && !a.metadata?.retiredFromFleet && !a.metadata?.staleLocalRegistration &&
+    byAgent.has(a.id) && a.capabilities?.some((c) => c === "chat" || c === "invoke"));
+  const pairingSessions = new Set();
+  let pairingError;
+  if (agents.some((a) => byAgent.get(a.id).some((e) => e.transport === "pairing_bridge"))) {
+    try {
+      for (const session of await get("/v1/pairing/sessions"))
+        if (session.externalSessionId && ["idle", "active"].includes(session.status)) pairingSessions.add(session.externalSessionId);
+    } catch (error) { pairingError = error; }
+  }
+  const sameHost = node.hostName === os.hostname() &&
+    ["127.0.0.1", "[::1]", "localhost"].includes(new URL(runtimeUrl()).hostname);
+  const evidence = { sameHost, pairingSessions, now: Date.now() };
+  const confirmed = agents.filter((a) => {
+    // The broker selects a preferred endpoint first. If the choice is
+    // ambiguous, a live sibling cannot vouch for the selected route.
+    const routes = byAgent.get(a.id), preferred = routes.filter((e) => e.preferred === true);
+    return (preferred.length ? preferred : routes).every((e) => e.nodeId === node.id && hasReceiveRoute(e, evidence));
+  });
+  if (!confirmed.length && pairingError) throw pairingError;
+  return confirmed.map((a) => ({ id: a.id, name: a.displayName || a.id }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 

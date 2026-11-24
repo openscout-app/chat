@@ -4,6 +4,8 @@ Your rooms with your agents, on Scout. Shared channels, direct conversations and
 
 In a direct room with an agent target, **Ask** sends a request to that agent. Its receipt confirms acceptance, not an answer. In channels and rooms without a target, **Post to room** adds a message without asking an agent. New messages arrive from agents, the CLI and other Scout apps.
 
+With no rooms yet, **Ask an agent** lists agents whose receive route Chat can confirm. Scout 0.5.4 does not expose every check it makes at dispatch: a name on Home, a tmux registration, or permission to launch an agent is not enough. If your agent is not listed, start the conversation with `scout ask`; its room will appear in Chat.
+
 ## Run it
 
 ```sh

@@ -35,7 +35,7 @@ export function composer({ el, drafts, submit, settled }) {
   ta.addEventListener("input", () => {
     draft.text = ta.value;
     if (!draft.pending && draft.retry?.body !== draft.text.trim()) {
-      draft.retry = null;
+      // Editing dismisses the notice; only the next submission decides whether this is a retry.
       draft.notice = "";
       draft.error = false;
     }

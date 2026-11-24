@@ -12,6 +12,9 @@ const listen = (s) => new Promise((resolve) => s.listen(0, "127.0.0.1", () => re
 const close = (s) => new Promise((resolve) => { s.close(resolve); s.closeAllConnections(); });
 const room = (conversationId, kind = "channel", fields = {}) => ({ conversationId, kind, title: conversationId, ...fields });
 const msg = (id, body, createdAt = 1) => ({ id, body, createdAt, class: "agent", actorId: "reader" });
+const reader = { id: "reader", kind: "agent", displayName: "Reader", capabilities: ["invoke"], authorityNodeId: "test-node" };
+const readerMailbox = { id: "reader-inbox", agentId: "reader", nodeId: "test-node", transport: "mcp_poll",
+  state: "registered", sessionId: "reader-session", metadata: { externalSession: true } };
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { resolve, promise }; };
 
 function messageEvent(f, conversationId) {
@@ -22,7 +25,7 @@ function messageEvent(f, conversationId) {
 // Exercise the actual page, local API, signed route selection and both SSE hops.
 // Only the upstream runtime is a fixture; never read or write operator records.
 async function fixture(t, settings = {}) {
-  const f = Object.assign({ rooms: [], agents: {}, homeAgents: [], messages: {}, writes: [], streams: new Set(),
+  const f = Object.assign({ rooms: [], agents: {}, endpoints: [], messages: {}, writes: [], streams: new Set(),
     online: true, streamUp: true, readsUp: true, writable: true, statusReads: 0 }, settings);
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://fixture.invalid");
@@ -46,7 +49,7 @@ async function fixture(t, settings = {}) {
       if (proof && (!f.writable || proof === "invalid")) return json(401, { error: "invalid_local_admin_proof" });
       return json(200, { items: f.rooms });
     }
-    if (url.pathname === "/v1/home") return json(200, { agents: f.homeAgents });
+    if (url.pathname === "/v1/endpoints") return json(200, { endpoints: f.endpoints });
     if (url.pathname === "/v1/snapshot") return json(200, { agents: f.agents, actors: {} });
     if (url.pathname === "/v1/messages" && req.method === "GET")
       return json(f.readsUp ? 200 : 503, f.messages[url.searchParams.get("conversationId")] || []);
@@ -147,6 +150,33 @@ test("an uncertain ask retries the same runtime request and acknowledges accepta
   assert.equal(await field.inputValue(), "Different ask");
 });
 
+test("restoring an uncertain draft reuses its request ID; submitting different text does not", async (t) => {
+  const f = await fixture(t, { rooms: [room("direct", "direct", { agentId: "reader", agentName: "Reader" })] });
+  const p = f.page, field = p.getByRole("textbox", { name: "Ask Reader" });
+  await p.route("**/api/rooms/direct/messages", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fetch(); // Accepted by Scout; the browser gets no receipt.
+    await route.abort();
+  });
+  await p.goto(f.url);
+  await field.fill("Read this");
+  const sendWithoutReceipt = async () => {
+    await field.press("Enter");
+    await p.getByText("No receipt. Send the same text to retry.", { exact: true }).waitFor();
+  };
+  await sendWithoutReceipt();
+  await field.press("x");
+  await field.press("Backspace");
+  await sendWithoutReceipt();
+  await field.pressSequentially("?");
+  await sendWithoutReceipt();
+  assert.equal(f.writes.length, 3);
+  assert.ok(f.writes[0].payload.requestId);
+  assert.deepEqual(f.writes[1], f.writes[0]);
+  assert.equal(f.writes[2].payload.body, "Read this?");
+  assert.notEqual(f.writes[2].payload.requestId, f.writes[0].payload.requestId);
+});
+
 test("a cold start distinguishes setup, no target and a real first ask", async (t) => {
   const f = await fixture(t, { online: false });
   const p = f.page;
@@ -163,8 +193,8 @@ test("a cold start distinguishes setup, no target and a real first ask", async (
   await p.getByRole("button", { name: "Check again" }).click();
   await p.getByText("Connect an agent to Scout to start a room.").waitFor();
   assert.equal(await p.getByRole("button", { name: "Ask an agent" }).isVisible(), false);
-  f.agents.reader = { id: "reader", kind: "agent", displayName: "Reader", capabilities: ["invoke"], wakePolicy: "on_demand" };
-  f.homeAgents = [{ id: "reader", reachable: true }];
+  f.agents.reader = reader;
+  f.endpoints = [readerMailbox];
   f.streamUp = true; // The upstream connection event refreshes the real target list.
   await p.getByRole("button", { name: "Ask an agent" }).click();
   const field = p.getByRole("textbox", { name: "Ask Reader" });
@@ -309,8 +339,7 @@ test("a changed recipient cannot turn a room post into an unnoticed ask", async 
 
 for (const timing of ["before", "after"]) {
   test(`a first ask keeps its draft and request ID when the HTTP receipt is lost ${timing} entering the new room`, async (t) => {
-    const f = await fixture(t, { agents: { reader: { id: "reader", kind: "agent", displayName: "Reader", capabilities: ["invoke"] } },
-      homeAgents: [{ id: "reader", reachable: true }] });
+    const f = await fixture(t, { agents: { reader }, endpoints: [readerMailbox] });
     const p = f.page, loseReceipt = deferred();
     t.after(() => loseReceipt.resolve());
     await p.route("**/api/ask", async (route) => {
