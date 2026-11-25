@@ -11,6 +11,10 @@
   <div class="frame">
     <aside class="rooms" aria-label="Rooms">
       <header class="brand">
+        <svg class="brand-mark" width="18" height="18" viewBox="5 -4 214 244" aria-hidden="true" focusable="false">
+          <path d="M103.01 13.21 Q112 8 120.99 13.21 L198.01 57.79 Q207 63 207 73.39 L207 162.61 Q207 173 198.01 178.21 L120.99 222.79 Q112 228 103.01 222.79 L25.99 178.21 Q17 173 17 162.61 L17 73.39 Q17 63 25.99 57.79 Z" fill="none" stroke="currentColor" stroke-width="20" stroke-linejoin="round"/>
+          <path d="M112 70 154 94v48l-42 24-42-24V94Z" fill="currentColor"/>
+        </svg>
         <span class="name" tabindex="-1">Scout Chat</span>
         <span class="host" id="host"></span>
       </header>
@@ -35,8 +39,9 @@
       <footer class="note" id="status"></footer>
     </aside>
     <main class="room" id="room">
-      <div class="empty" id="empty">
+      <div class="empty" id="empty" data-loading>
         <h1 class="lede" id="empty-title">Loading rooms…</h1>
+        <div class="loading-skeleton" aria-hidden="true"><span></span><span></span></div>
         <p id="empty-detail"></p>
         <button class="action" id="first-ask" type="button" hidden>Ask an agent</button>
         <div id="recovery" hidden>

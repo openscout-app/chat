@@ -282,6 +282,34 @@ test("reopening the browser stream repairs missed data even if the runtime strea
   assert.ok(f.statusReads > reads);
 });
 
+test("the loading skeleton precedes API readiness and respects reduced motion", async (t) => {
+  const f = await fixture(t, { rooms: [room("one"), room("two")] });
+  const p = f.page, release = deferred();
+  await p.route(/\/api\/(rooms|status)$/, async (route) => {
+    await release.promise;
+    await route.continue();
+  });
+  try {
+    await p.goto(f.url);
+    const skeleton = p.locator("#empty .loading-skeleton");
+    await skeleton.waitFor();
+    assert.equal(await p.locator("#empty-title").textContent(), "Loading rooms…");
+    assert.equal(await skeleton.getAttribute("aria-hidden"), "true");
+    assert.equal(await skeleton.locator("span").first().evaluate((bar) => getComputedStyle(bar).animationName), "loading-shimmer");
+    await p.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await skeleton.locator("span").first().evaluate((bar) => getComputedStyle(bar).animationName), "none");
+    await p.setViewportSize({ width: 390, height: 730 });
+    await p.locator("#index-empty .loading-skeleton").waitFor();
+    assert.equal((await p.locator(".brand").boundingBox()).height, 40);
+    release.resolve();
+    await skeleton.waitFor({ state: "hidden" });
+    await p.getByRole("link", { name: "one" }).click();
+    assert.equal((await p.locator(".room-head").boundingBox()).height, 40);
+  } finally {
+    release.resolve();
+  }
+});
+
 test("metadata clears the contrast floor in both themes and the focused composer keeps its ring", async (t) => {
   const f = await fixture(t, { rooms: [room("one", "channel", { lastMessageAt: Date.now() })],
     messages: { one: [msg("a", "A long message. ".repeat(45))] } });

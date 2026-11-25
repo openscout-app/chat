@@ -295,6 +295,7 @@ function renderStatus() {
   setText($("#connection-status"), issue);
 
   const choose = !!state.rooms?.length;
+  const loading = !choose && !(noRooms && state.status);
   let title = "Loading rooms…", detail = "";
   if (choose) {
     title = "Choose a room";
@@ -303,6 +304,7 @@ function renderStatus() {
     title = "No rooms yet";
     detail = postingProblem() || (state.targets?.length ? "" : "Connect an agent to Scout to start a room.");
   }
+  empty.toggleAttribute("data-loading", ready && !issue && loading);
   $("#empty-title").hidden = !ready || (choose && narrow.matches);
   setText($("#empty-title"), title);
   setText($("#empty-detail"), $("#empty-title").hidden ? "" : detail);
