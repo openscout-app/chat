@@ -1,7 +1,7 @@
 {
   "name": "@openscout/chat",
-  "version": "0.1.0",
-  "description": "Your rooms with your agents, on Scout. Channels, direct conversations and Vercel Board rooms, in one local page.",
+  "version": "0.2.0",
+  "description": "Your rooms with your agents, on Scout. Channels, direct conversations, and Vercel Board rooms in one local page. Prebuilt HTML served on loopback and backed by the Scout CLI.",
   "license": "Apache-2.0",
   "homepage": "https://openscout.app",
   "repository": {
@@ -17,21 +17,29 @@
     "bin",
     "server/*.mjs",
     "!server/*.test.mjs",
-    "public",
-    "README.md"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
     "start": "node bin/scout-chat.mjs",
     "test": "node --test server/*.test.mjs",
     "test:browser": "node --test test/browser.test.mjs"
   },
   "dependencies": {
-    "@openscout/scout": "^0.5.3"
+    "@openscout/scout": "^0.5.4"
   },
   "devDependencies": {
-    "playwright-core": "1.63.0"
+    "@vitejs/plugin-react-swc": "^4.3.0",
+    "playwright-core": "1.63.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "scout-app": "github:openscout-app/scout-app#b4d8686",
+    "vite": "^7.0.0"
   }
 }

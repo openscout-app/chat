@@ -1,3 +1,9 @@
+# OpenScout local state
+.openscout/
+.scout-worktrees/
+
+# Local dependencies
 node_modules/
+*.tgz
 .DS_Store
 *.log
