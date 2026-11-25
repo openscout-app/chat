@@ -1,10 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ChatsGlyph,
   ScoutAppFrame,
   StandaloneRecordRouter,
   navigateBrowser,
   useScoutThinHost,
+  type ScoutPageTab,
   type ScoutThinStatusBase,
 } from "scout-app/shell";
 import "scout-app/shell.css";
@@ -14,6 +16,10 @@ import "./app.css";
 interface ChatHostStatus extends ScoutThinStatusBase {
   localSessions: number;
 }
+
+const CHAT_PAGES: readonly ScoutPageTab[] = [
+  { id: "chat", label: "Chat", route: "/", icon: ChatsGlyph },
+];
 
 function StandaloneChatApp() {
   const { status, installing, runSetup } = useScoutThinHost<ChatHostStatus>({
@@ -45,6 +51,8 @@ function StandaloneChatApp() {
   return (
     <ScoutAppFrame
       product="Chat"
+      pages={CHAT_PAGES}
+      chrome="sidebar"
       variant="chat"
       rail="full"
       status={badge}
