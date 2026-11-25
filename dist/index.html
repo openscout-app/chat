@@ -1,95 +1,90 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scout Chat</title>
-  <link rel="stylesheet" href="/app.css">
-  <script type="module" src="/app.js"></script>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scout Chat</title>
+    <script type="module" crossorigin src="/assets/index-B4nZZ0wF.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DBb73Ymb.css">
+  <style id="scout-boot-css">
+:root {
+  color-scheme: dark light;
+  --sb-bg: #0c0d10;
+  --sb-surface: #12141a;
+  --sb-border: rgba(255, 255, 255, 0.08);
+  --sb-ink: #eceef2;
+  --sb-muted: rgba(236, 238, 242, 0.48);
+  --sb-bar: rgba(236, 238, 242, 0.07);
+  --sb-bar-strong: rgba(236, 238, 242, 0.12);
+  --sb-accent: #e8a33d;
+  --sb-rail-reading: 760px;
+  --sb-rail-wide: 1180px;
+  --sb-rail-gutter: 24px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --sb-bg: #fbfbfa;
+    --sb-surface: #ffffff;
+    --sb-border: rgba(16, 18, 24, 0.1);
+    --sb-ink: #18191c;
+    --sb-muted: rgba(21, 23, 28, 0.5);
+    --sb-bar: rgba(21, 23, 28, 0.06);
+    --sb-bar-strong: rgba(21, 23, 28, 0.11);
+    --sb-accent: #b86e00;
+  }
+}
+@media (max-width: 560px) {
+  :root { --sb-rail-gutter: 16px; }
+}
+body:has(.sb-boot) { margin: 0; padding: 0; background: var(--sb-bg); }
+@keyframes sbPulse { 0%, 100% { opacity: 0.92; } 50% { opacity: 0.46; } }
+.sb-boot { height: 100vh; display: flex; flex-direction: column; background: var(--sb-bg); color: var(--sb-ink); font-family: system-ui, sans-serif; }
+.sb-boot main { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable both-edges; }
+.sb-boot-nav { box-sizing: border-box; flex: none; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--sb-border); background: var(--sb-bg); }
+.sb-boot-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; line-height: 1; letter-spacing: -0.005em; }
+.sb-boot-pill { box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 24px; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--sb-muted); padding: 0 8px; border: 1px solid var(--sb-border); border-radius: 4px; }
+.sb-boot-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--sb-accent); animation: sbPulse 1.5s ease-in-out infinite; }
+.sb-boot .sb-skel { --sb-rail: var(--sb-rail-reading); width: 100%; max-width: calc(var(--sb-rail) + 2 * var(--sb-rail-gutter)); margin-inline: auto; padding: 20px var(--sb-rail-gutter); box-sizing: border-box; animation: sbPulse 1.6s ease-in-out infinite; }
+.sb-boot .sb-skel[data-rail="wide"] { --sb-rail: var(--sb-rail-wide); }
+.sb-boot .sb-skel[data-rail="full"] { max-width: none; padding-inline: 0; }
+.sb-skel-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--sb-border); }
+.sb-skel-chip { height: 24px; border-radius: 4px; background: var(--sb-bar); border: 1px solid var(--sb-border); }
+.sb-skel-card { border: 1px solid var(--sb-border); background: var(--sb-surface); border-radius: 6px; padding: 14px 16px; margin-bottom: 10px; }
+.sb-skel-row { display: grid; grid-template-columns: 76px 140px minmax(0, 1fr) 76px 72px minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--sb-border); }
+.sb-skel-line { height: 11px; border-radius: 3px; background: var(--sb-bar); }
+.sb-skel-line--strong { height: 13px; background: var(--sb-bar-strong); }
+.sb-skel-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.sb-skel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.sb-skel-row > *, .sb-skel-cols .sb-skel-line, .sb-skel-grid .sb-skel-line { max-width: 100%; }
+@media (max-width: 560px) {
+  .sb-skel-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sb-skel-cols, .sb-skel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-boot-dot, .sb-skel, .s-page-skeleton .sb-skel, .sb-boot .sb-skel { animation: none; }
+}
+</style>
 </head>
-<body>
-  <div class="frame">
-    <aside class="rooms" aria-label="Rooms">
-      <header class="brand">
-        <svg class="brand-mark" width="18" height="18" viewBox="5 -4 214 244" aria-hidden="true" focusable="false">
-          <path d="M103.01 13.21 Q112 8 120.99 13.21 L198.01 57.79 Q207 63 207 73.39 L207 162.61 Q207 173 198.01 178.21 L120.99 222.79 Q112 228 103.01 222.79 L25.99 178.21 Q17 173 17 162.61 L17 73.39 Q17 63 25.99 57.79 Z" fill="none" stroke="currentColor" stroke-width="20" stroke-linejoin="round"/>
-          <path d="M112 70 154 94v48l-42 24-42-24V94Z" fill="currentColor"/>
-        </svg>
-        <span class="name" tabindex="-1">Scout Chat</span>
-        <span class="host" id="host"></span>
-      </header>
-      <div class="index-scroll">
-        <nav id="room-list" aria-label="Conversations">
-          <section class="group" id="channels" hidden><h2>Channels</h2><div></div></section>
-          <section class="group" id="direct" hidden><h2>Direct</h2><div></div></section>
-        </nav>
-        <div id="index-empty"></div>
-      </div>
-      <section class="integration-actions" aria-labelledby="connections-title">
-        <h2 id="connections-title">Connections</h2>
-        <button type="button" class="integration-button" data-integration="board">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
-          Add a Vercel Board
-        </button>
-        <button type="button" class="integration-button" data-integration="slack">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
-          Add Slack
-        </button>
-      </section>
-      <footer class="note" id="status"></footer>
-    </aside>
-    <main class="room" id="room">
-      <div class="empty" id="empty" data-loading>
-        <h1 class="lede" id="empty-title">Loading rooms…</h1>
-        <div class="loading-skeleton" aria-hidden="true"><span></span><span></span></div>
-        <p id="empty-detail"></p>
-        <button class="action" id="first-ask" type="button" hidden>Ask an agent</button>
-        <div id="recovery" hidden>
-          <p id="connection-status" role="status"></p>
-          <div class="setup" hidden>
-            <code id="setup-command">npx github:openscout-app/chat setup</code>
-            <button class="action" type="button" id="copy">Copy</button>
+  <body>
+    <div id="root"><div class="sb-boot" data-scout-boot="chat">
+    <header class="sb-boot-nav">
+      <span class="sb-boot-brand"><svg viewBox="0 0 18 18" width="18" height="18" fill="none" aria-hidden="true"><path d="M9 1 16 5v8l-7 4-7-4V5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 4.43 13 6.71v4.58L9 13.57 5 11.29V6.71Z" fill="currentColor"/></svg><span>Scout Chat</span></span>
+      <span class="sb-boot-pill"><span class="sb-boot-dot"></span><span>Reading local Scout state</span></span>
+    </header>
+    <main><div class="sb-skel s-surface-rail" data-rail="full" role="status" aria-label="Loading Chat" style="display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:16px">
+        <div class="sb-skel-card" style="height:360px">
+          <div class="sb-skel-line sb-skel-line--strong" style="width:90px;margin-bottom:14px"></div>
+          <div class="sb-skel-line" style="width:85%;margin-bottom:12px"></div><div class="sb-skel-line" style="width:85%;margin-bottom:12px"></div><div class="sb-skel-line" style="width:85%;margin-bottom:12px"></div><div class="sb-skel-line" style="width:85%;margin-bottom:12px"></div>
+        </div>
+        <div class="sb-skel-card" style="height:360px;display:flex;flex-direction:column;justify-content:space-between">
+          <div>
+            <div class="sb-skel-line sb-skel-line--strong" style="width:140px;margin-bottom:18px"></div>
+            <div class="sb-skel-line" style="width:72%;margin-bottom:10px"></div>
+            <div class="sb-skel-line" style="width:58%"></div>
           </div>
-          <button class="action" type="button" id="check">Check again</button>
+          <div class="sb-skel-chip" style="height:38px;width:100%"></div>
         </div>
-      </div>
-      <section id="conversation" hidden>
-        <header class="room-head">
-          <a class="rooms-back" href="/">Rooms</a>
-          <h1 tabindex="-1"></h1><span class="sub"></span>
-        </header>
-        <div class="log" tabindex="0" role="region" aria-label="Messages">
-          <p id="log-note" class="quiet" role="status" hidden></p>
-          <div id="messages"></div>
-        </div>
-        <div id="room-composer"></div>
-      </section>
-    </main>
-  </div>
-  <dialog class="integration-panel" id="ask-panel" aria-labelledby="ask-title">
-    <header class="integration-heading">
-      <h2 id="ask-title">Ask an agent</h2>
-      <form method="dialog"><button class="action" type="submit">Close</button></form>
-    </header>
-    <label>Agent<select id="ask-target"></select></label>
-    <div id="ask-composer"></div>
-  </dialog>
-  <dialog class="integration-panel" id="connections-panel" aria-labelledby="integration-title">
-    <header class="integration-heading">
-      <h2 id="integration-title" tabindex="-1"></h2>
-      <form method="dialog">
-        <button class="integration-button" type="submit" aria-label="Close connection panel">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
-        </button>
-      </form>
-    </header>
-    <p id="integration-capability" role="status"></p>
-    <form id="integration-form" method="post" hidden autocomplete="off">
-      <div id="integration-fields"></div>
-      <button class="integration-button primary" type="submit">Connect</button>
-    </form>
-    <p id="integration-result" role="status" tabindex="-1"></p>
-    <ol id="integration-steps" hidden></ol>
-  </dialog>
-</body>
+      </div></main>
+  </div></div>
+  </body>
 </html>
